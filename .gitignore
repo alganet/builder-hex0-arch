@@ -3,4 +3,5 @@ __pycache__/
 hex2/hex2
 *.o
 *.bin
-test.img
+*.img
+qemu-local/

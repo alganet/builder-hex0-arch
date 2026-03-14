@@ -11,33 +11,42 @@ Inspired by [builder-hex0](https://github.com/ironmeld/builder-hex0) by Rick Mas
 
 Builder-hex0 is a bootable disk image containing a kernel, shell, and hex0 compiler.
 The x86 original fits in under 4KB of binary. This RISC-V port uses a two-stage
-design and runs in QEMU's `virt` machine with OpenSBI providing firmware services.
+design with board-specific stage 1 bootloaders and a portable stage 2 kernel.
 
 
 ## Two-Stage Architecture
 
-Like the x86 original, the kernel boots in two stages:
+The kernel uses a **board-specific stage 1** and a **portable stage 2**:
 
-* **Stage 1** (`builder-hex0-riscv64-stage1.S`, 508 bytes): Minimal hex0 compiler
-  bootloader loaded at `0x80200000` by OpenSBI. Reads hex0 source from disk,
-  compiles it to binary at `0x80210000`, and jumps there. Passes the next disk
-  sector number to stage 2 via register `a0`.
+* **Stage 1** (board-specific, 512-756 bytes): Hex0 compiler bootloader. Finds
+  the disk on the target platform, reads hex0 source, compiles it at
+  `0x80210000`, and jumps there with `a0 = next disk sector`, `a1 = DTB pointer`.
 
-* **Stage 2** (`builder-hex0-riscv64-stage2.S`, ~8KB): Full kernel with VirtIO
-  driver, Sv39 paging, syscalls, process simulation, filesystem, and internal
-  shell. Stored on disk as human-readable hex0 source, compiled at boot time
-  by stage 1.
+* **Stage 2** (`builder-hex0-riscv64-stage2.S`, ~9KB): Portable kernel that
+  works on any supported board. Parses the Flattened Device Tree (FDT) to
+  discover storage devices at runtime. Supports VirtIO block and SPI+SD storage.
+  Provides Sv39 paging, syscalls, process simulation, filesystem, and internal
+  shell. Uses SBI for console and reboot.
 
-This design minimizes the binary seed to 508 bytes. The rest of the kernel is
-readable hex0 source on disk, maximizing bootstrappability.
+The **same stage 2 hex0 source works on every board** — only stage 1 changes
+per platform. Checksums remain stable across boards.
+
+
+## Supported Boards
+
+| Board | Stage 1 | Storage | QEMU machine |
+|-------|---------|---------|--------------|
+| QEMU virt | `stage1-virt.S` (512 bytes) | VirtIO block | `-machine virt` |
+| SiFive HiFive Unleashed | `stage1-sifive_u.S` (756 bytes) | SD card over SPI | `-machine sifive_u` |
 
 
 ## Features
 
-* Two-stage boot: 508-byte binary seed + ~25KB hex0 source
-* ~8KB stage 2 kernel, written in RISC-V assembly
-* Runs in S-mode under OpenSBI (analogous to x86 builder-hex0 running under BIOS)
-* VirtIO-MMIO block device driver for disk I/O
+* Two-stage boot: board-specific binary seed + ~25KB shared hex0 source
+* ~9KB portable stage 2 kernel, written in RISC-V assembly
+* Runs in S-mode under OpenSBI
+* DTB-driven storage discovery (VirtIO block or SPI+SD)
+* Disk I/O abstraction via function pointers (`disk_read_fn` / `disk_write_fn`)
 * Sv39 virtual memory with gigapage mappings
 * 15 Linux-compatible system calls (RISC-V ABI)
 * In-memory filesystem, process simulation (fork/exec/exit/waitid)
@@ -54,32 +63,40 @@ Requires Python 3 and a C compiler (for the hex2 linker):
 make
 ```
 
-This produces:
-* `builder-hex0-riscv64-stage1.bin` — stage 1 bootloader (loaded by QEMU via `-kernel`)
-* `builder-hex0-riscv64-stage2.hex0` — stage 2 kernel as hex0 source (placed on disk)
-
-To produce commented hex0 from hex2 (for review/audit):
-```
-make builder-hex0-riscv64-stage1.hex0
-```
+This produces binaries for all supported boards:
+* `builder-hex0-riscv64-stage1-virt.bin` — virt stage 1
+* `builder-hex0-riscv64-stage1-sifive_u.bin` — sifive_u stage 1
+* `builder-hex0-riscv64-stage2.hex0` — portable stage 2 (shared)
 
 
 ## Testing
-
-Boot with stage2.hex0 on disk to verify two-stage boot works:
 
 ```
 make test
 ```
 
+Runs boot tests for all supported boards. The sifive_u test requires
+QEMU >= 10.1 (SPI-mode SD card fixes).
+
 
 ## Booting
 
+### QEMU virt (VirtIO)
+
 ```
 qemu-system-riscv64 -machine virt -m 2G -nographic \
-    -kernel builder-hex0-riscv64-stage1.bin \
+    -kernel builder-hex0-riscv64-stage1-virt.bin \
     -drive file=disk.img,format=raw,if=none,id=hd0 \
     -device virtio-blk-device,drive=hd0 \
+    --no-reboot
+```
+
+### SiFive HiFive Unleashed (SD card)
+
+```
+qemu-system-riscv64 -machine sifive_u -m 2G -nographic \
+    -kernel builder-hex0-riscv64-stage1-sifive_u.bin \
+    -drive file=disk.img,format=raw,if=sd \
     --no-reboot
 ```
 
@@ -95,14 +112,36 @@ Sector N+1..:  filesystem data (src/putdir/putfile entries)
 ```
 
 
+## Hardware Abstraction
+
+Stage 2 is portable across RISC-V boards. It relies on:
+
+* **SBI** for console (legacy putchar, ext 0x01) and reboot (SRST, ext
+  0x53525354 with type=COLD_REBOOT). SBI is the standard RISC-V hardware
+  abstraction layer — any board with OpenSBI or equivalent firmware provides it.
+  Reboot (not shutdown) is used because all boards have a reboot device and it
+  matches the bootstrap lifecycle (boot → build → rewrite disk → reboot).
+* **FDT (Flattened Device Tree)** for storage device discovery. Stage 2 parses
+  the DTB passed in `a1` to find either VirtIO MMIO block devices or SiFive SPI
+  controllers with SD card slots.
+* **Disk I/O function pointers** (`disk_read_fn` / `disk_write_fn`) in global
+  data. The active storage driver sets these during init. Both VirtIO and SPI+SD
+  drivers implement the same `(a0=sector, a1=buffer)` interface.
+* **RAM at `0x80000000`** — the near-universal RISC-V convention.
+
+To port to a new board, create a stage 1 that finds the disk, loads and
+compiles stage 2, then jumps to it with `a0 = filesystem start sector` and
+`a1 = DTB pointer`. If the board uses a new storage type, add a driver to
+stage 2 with the `(a0=sector, a1=buffer)` interface.
+
+
 ## Machine Requirements
 
 * RISC-V 64-bit processor (RV64IM)
 * 2GB of memory
-* QEMU `virt` machine with OpenSBI
-  * SBI legacy `putchar` (extension 0x01) for console output
-  * SBI SRST (extension 0x53525354) for shutdown
-  * VirtIO-MMIO block device for disk I/O
+* SBI firmware (OpenSBI or equivalent)
+* FDT/DTB describing the hardware
+* VirtIO-MMIO block device or SD card over SPI (discovered via DTB)
 
 
 ## System Calls
@@ -144,19 +183,21 @@ Built-in commands:
 | Aspect | x86 | RISC-V |
 |--------|-----|--------|
 | Boot | MBR/BIOS (stage1+stage2) | QEMU `-kernel` stage1 + hex0 stage2 on disk |
-| Binary seed | 192 bytes | 508 bytes |
+| Binary seed | 192 bytes | 512-756 bytes (board-dependent) |
 | Privilege | 32-bit protected mode | S-mode with Sv39 paging |
 | Console | BIOS int 10h | SBI putchar |
-| Disk | BIOS int 13h (LBA) | VirtIO-MMIO block device |
-| Shutdown | Triple fault | SBI SRST |
-| Stage 2 size | ~4KB | ~8KB |
+| Disk | BIOS int 13h (LBA) | VirtIO or SPI+SD (DTB-discovered) |
+| Reboot | Triple fault | SBI SRST cold reboot |
+| Stage 2 size | ~4KB | ~9KB |
 | ELF format | 32-bit | 64-bit |
 | Syscall ABI | int 0x80, x86 numbers | ecall, RISC-V Linux numbers |
 
 
 ## Limitations
 
-* VirtIO disk driver is QEMU-specific (replaceable for real hardware)
+* Stage 1 is board-specific (currently QEMU virt and sifive_u)
+* Stage 2 supports VirtIO block and SPI+SD storage (DTB-discovered)
+* sifive_u test requires QEMU >= 10.1 (SPI-mode SD card fixes)
 * Only 8192 files can be created
 * File names limited to 1024 bytes
 * One child process at a time (fork simulation)

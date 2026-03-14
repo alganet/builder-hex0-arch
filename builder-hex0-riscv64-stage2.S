@@ -6,13 +6,16 @@
 # A minimal kernel for bootstrapping compilers from source on RISC-V.
 # Inspired by builder-hex0 (https://github.com/ironmeld/builder-hex0).
 #
-# Boot: qemu-system-riscv64 -machine virt -m 2G -nographic \
-#       -kernel builder-hex0-riscv64-stage1.bin \
-#       -drive file=disk.img,format=raw,if=none,id=hd0 \
-#       -device virtio-blk-device,drive=hd0 --no-reboot
+# Boot (virt):     qemu-system-riscv64 -machine virt -m 2G -nographic \
+#                  -kernel builder-hex0-riscv64-stage1-virt.bin \
+#                  -drive file=disk.img,format=raw,if=none,id=hd0 \
+#                  -device virtio-blk-device,drive=hd0 --no-reboot
+# Boot (sifive_u): qemu-system-riscv64 -machine sifive_u -m 2G -nographic \
+#                  -kernel builder-hex0-riscv64-stage1-sifive_u.bin \
+#                  -drive file=disk.img,format=raw,if=sd --no-reboot
 #
 # Compiled by stage 1 from hex0 source on disk to 0x80210000.
-# On entry: a0 = next disk sector (filesystem start)
+# On entry: a0 = next disk sector (filesystem start), a1 = DTB pointer
 #
 # Memory layout (physical addresses):
 #   0x80100000  Sv39 root page table (4KB)
@@ -37,8 +40,8 @@
 #   Kernel disables paging (satp=0) on trap entry, enables before sret
 #
 # Global data at 0x80300000:
-#   +0x000: virtio_mmio_base (8 bytes)
-#   +0x008: virtio_struct_base (8 bytes)
+#   +0x000: storage_mmio_base (8 bytes) [VirtIO MMIO or SPI controller base]
+#   +0x008: virtio_struct_base (8 bytes) [VirtIO only]
 #   +0x010: next_filenum (8 bytes)
 #   +0x018: next_file_address (8 bytes)
 #   +0x020: next_process_num (8 bytes)
@@ -51,6 +54,10 @@
 #   +0x058: cmd_args (3x8: argv[0], argv[1], NULL)
 #   +0x070: cmd_env (1x8: NULL)
 #   +0x078: satp_value (8 bytes)
+#   +0x080: dtb_pointer (8 bytes)
+#   +0x088: disk_read_fn (8 bytes)   [function pointer, set by storage driver]
+#   +0x090: disk_write_fn (8 bytes)  [function pointer, set by storage driver]
+#   +0x098: spi_base (8 bytes)       [SPI+SD only, used by spi_transfer]
 #
 # Process descriptor (4096 bytes each, at 0x80400000):
 #   +0x000: process_address (8)
@@ -121,7 +128,7 @@ trap_handler:
     sd s1, 16(sp)
     mv s0, t1                # s0 = bad sscratch value
     csrrs s1, sscratch, zero # s1 = old user sp
-    j shutdown
+    j reboot
 trap_sp_ok:
     # Allocate trap frame (256 bytes = 32 slots of 8 bytes)
     addi sp, sp, -256
@@ -171,7 +178,7 @@ trap_sp_ok:
     beq t0, t1, dispatch
 
     # Not ecall from U-mode: halt
-    j shutdown
+    j reboot
 
 # Dispatch syscall based on a7
 dispatch:
@@ -487,7 +494,7 @@ read_stdin_loop:
     mv a0, t1                # sector number
     lui a1, 0x50008
     slli a1, a1, 1           # buffer = 0xA0010000
-    call virtio_read_sector
+    call disk_read_sector
     # Advance sector, reset offset
     lui t0, 0x40180
     slli t0, t0, 1
@@ -1776,22 +1783,21 @@ load_data_base:
     ret
 
 #============================================================
-# shutdown: SBI SRST system reset (via OpenSBI in M-mode)
-# OpenSBI handles the actual QEMU test device write from M-mode
-# where PMP allows it. Direct S-mode write to 0x100000 faults.
+# reboot: SBI SRST cold reboot (via OpenSBI)
+# Uses COLD_REBOOT (type 1) instead of SHUTDOWN (type 0) because:
+# - All boards have a reboot device (not all have a shutdown device)
+# - Reboot is the correct semantic for bootstrapping (boot -> build -> reboot)
+# - Tests use --no-reboot so QEMU exits cleanly on reboot
 #============================================================
-shutdown:
+reboot:
     lui a7, 0x53525
     addi a7, a7, 0x354       # a7 = 0x53525354 (SRST EID)
     li a6, 0                 # FID 0 = sbi_system_reset
-    li a0, 0                 # type 0 = SHUTDOWN
+    li a0, 1                 # type 1 = COLD_REBOOT
     li a1, 0                 # reason 0 = NONE
     ecall
-    # Legacy SBI shutdown as fallback
-    li a7, 8
-    ecall
-shutdown_hang:
-    j shutdown_hang
+reboot_hang:
+    j reboot_hang
 
 #============================================================
 # memset_zero: Zero memory from a0 to a0+a1
@@ -1826,6 +1832,30 @@ memcpy_done:
     ret
 
 #============================================================
+# bswap32: Byte-swap a 32-bit value (big-endian <-> little-endian)
+# a0 = input value (only low 32 bits used)
+# Returns: a0 = byte-swapped value (zero-extended to 64 bits)
+#============================================================
+bswap32:
+    # Extract bytes and reassemble in reversed order
+    # Input:  a0 = [B3 B2 B1 B0] (low 32 bits)
+    # Output: a0 = [B0 B1 B2 B3]
+    andi t0, a0, 0xFF           # t0 = B0
+    slli t0, t0, 24             # t0 = B0 << 24
+    srli t1, a0, 8
+    andi t1, t1, 0xFF           # t1 = B1
+    slli t1, t1, 16             # t1 = B1 << 16
+    or t0, t0, t1
+    srli t1, a0, 16
+    andi t1, t1, 0xFF           # t1 = B2
+    slli t1, t1, 8              # t1 = B2 << 8
+    or t0, t0, t1
+    srli t1, a0, 24
+    andi t1, t1, 0xFF           # t1 = B3
+    or a0, t0, t1
+    ret
+
+#============================================================
 # read_stdin_byte: Read one byte from stdin (disk via VirtIO)
 # Uses globals: stdin_sector (+0x30), stdin_offset (+0x38)
 # Returns: a0 = byte read
@@ -1849,7 +1879,7 @@ read_stdin_byte:
     ld a0, 0x30(t0)          # sector number
     lui a1, 0x50008
     slli a1, a1, 1           # buffer = 0xA0010000
-    call virtio_read_sector
+    call disk_read_sector
 
     # Advance sector, reset offset
     lui t0, 0x40180
@@ -2212,9 +2242,230 @@ fd_to_file_index:
     ret
 
 #============================================================
-# virtio_init: Find and initialize VirtIO block device
-# Scans MMIO addresses 0x10001000-0x10008000
-# Stores MMIO base and struct base in global data
+# fdt_find_storage: Parse FDT to find storage device
+# a0 = DTB pointer (from OpenSBI via stage 1)
+# Returns: a0 = MMIO base address (0 if not found)
+#          a1 = storage type (0=none, 1=virtio, 2=spi_sd)
+#
+# Single-pass DTB walk. Detects:
+# - VirtIO: node name starts with "virt", reg property gives MMIO base,
+#   probed for VirtIO magic (0x74726976) and block device ID (2)
+# - SPI+SD: node name starts with "spi@" (saves reg as SPI base),
+#   child node name starts with "mmc@" (confirms SD card present)
+#
+# No fallback — returns what the DTB describes.
+# FDT is big-endian; uses bswap32 for all multi-byte fields.
+#============================================================
+fdt_find_storage:
+    addi sp, sp, -96
+    sd ra, 0(sp)
+    sd s0, 8(sp)
+    sd s1, 16(sp)
+    sd s3, 24(sp)
+    sd s4, 32(sp)
+    sd s5, 40(sp)
+    sd s6, 48(sp)
+    sd s8, 56(sp)
+    sd s9, 64(sp)
+    sd s10, 72(sp)
+    sd s11, 80(sp)
+
+    beqz a0, fdt_not_found      # null DTB pointer
+    mv s0, a0                   # s0 = DTB base
+
+    # Validate FDT magic: 0xd00dfeed big-endian = 0xedfe0dd0 as LE lw
+    lw t0, 0(s0)
+    lui t1, 0xedfe1
+    addi t1, t1, -560           # t1 = 0xedfe0dd0
+    bne t0, t1, fdt_not_found
+
+    # Get structure block offset (big-endian u32 at dtb+8)
+    lw a0, 8(s0)
+    call bswap32
+    add s1, s0, a0              # s1 = struct block pointer
+
+    # Get strings block offset (big-endian u32 at dtb+0xC)
+    lw a0, 0xC(s0)
+    call bswap32
+    add s3, s0, a0              # s3 = strings block base
+
+    li s4, 0                    # s4 = node type (0=none, 1=virtio, 2=spi)
+    li s5, 0                    # s5 = candidate MMIO address (current node)
+    li s10, 0                   # s10 = SPI base (saved from parent spi@ node)
+    li s11, 0                   # s11 = mmc_found flag
+
+fdt_walk:
+    lw a0, 0(s1)
+    call bswap32
+    mv s9, a0                   # s9 = token
+    addi s1, s1, 4
+
+    # FDT_END (9)
+    li t0, 9
+    beq s9, t0, fdt_walk_done
+
+    # FDT_BEGIN_NODE (1)
+    li t0, 1
+    beq s9, t0, fdt_begin_node
+
+    # FDT_END_NODE (2)
+    li t0, 2
+    beq s9, t0, fdt_end_node
+
+    # FDT_PROP (3)
+    li t0, 3
+    beq s9, t0, fdt_prop
+
+    # NOP (4) or unknown: skip
+    j fdt_walk
+
+fdt_begin_node:
+    # Reset per-node state
+    li s4, 0
+    li s5, 0
+
+    # Check node name prefix (first 4 bytes as LE lw)
+    lw t0, 0(s1)
+
+    # "virt" = 0x74726976
+    lui t1, 0x74727
+    addi t1, t1, -1674          # t1 = 0x74726976
+    bne t0, t1, fdt_check_spi
+    li s4, 1                    # mark as virtio node
+    j fdt_skip_name
+
+fdt_check_spi:
+    # "spi@" = bytes 73 70 69 40 = LE 0x40697073
+    lui t1, 0x40697
+    addi t1, t1, 0x073          # t1 = 0x40697073
+    bne t0, t1, fdt_check_mmc
+    li s4, 2                    # mark as spi node
+    j fdt_skip_name
+
+fdt_check_mmc:
+    # "mmc@" = bytes 6d 6d 63 40 = LE 0x40636d6d
+    lui t1, 0x40637
+    addi t1, t1, -659           # t1 = 0x40636d6d
+    bne t0, t1, fdt_skip_name
+    beqz s10, fdt_skip_name     # only if inside an spi@ node (s10 has base)
+    li s11, 1                   # mmc child confirmed under spi@ parent
+
+fdt_skip_name:
+    # Skip null-terminated node name, then align to 4 bytes
+    lbu t0, 0(s1)
+    addi s1, s1, 1
+    bnez t0, fdt_skip_name
+    addi s1, s1, 3
+    andi s1, s1, -4
+    j fdt_walk
+
+fdt_end_node:
+    # Check if we found a VirtIO block device
+    li t0, 1
+    bne s4, t0, fdt_end_check_spi
+    beqz s5, fdt_walk
+
+    # Probe: check VirtIO magic at candidate address
+    lw t0, 0(s5)
+    lui t1, 0x74727
+    addi t1, t1, -1674          # 0x74726976
+    bne t0, t1, fdt_walk
+    lw t0, 8(s5)
+    li t1, 2
+    bne t0, t1, fdt_walk
+
+    # Found VirtIO block device
+    mv a0, s5
+    li a1, 1                    # type = STORAGE_VIRTIO
+    j fdt_found
+
+fdt_end_check_spi:
+    # When an spi@ node ends, save its reg as candidate SPI base
+    li t0, 2
+    bne s4, t0, fdt_walk
+    bnez s5, fdt_save_spi_base
+    j fdt_walk
+fdt_save_spi_base:
+    mv s10, s5                  # save SPI base for later
+    j fdt_walk
+
+fdt_prop:
+    # Read property length (big-endian u32)
+    lw a0, 0(s1)
+    call bswap32
+    mv s6, a0                   # s6 = prop_len
+
+    # Read property nameoff (big-endian u32)
+    lw a0, 4(s1)
+    call bswap32
+    mv s8, a0                   # s8 = nameoff
+
+    addi s1, s1, 8              # skip len + nameoff fields
+    # s1 now points to property data
+
+    # Only extract reg from virtio or spi nodes
+    beqz s4, fdt_prop_skip
+
+    # Check if property name is "reg\0" (LE lw = 0x00676572)
+    add t0, s3, s8              # property name pointer
+    lw t0, 0(t0)
+    li t1, 0x00676572
+    bne t0, t1, fdt_prop_skip
+
+    # Extract MMIO base address from reg property
+    # Assumes #address-cells=2: 8-byte address (2x big-endian u32)
+    lw a0, 0(s1)
+    call bswap32
+    slli s5, a0, 32             # high 32 bits
+    lw a0, 4(s1)
+    call bswap32
+    or s5, s5, a0               # s5 = full 64-bit MMIO address
+
+    # If this is a spi@ node, save the base immediately (before child nodes reset s5)
+    li t0, 2
+    bne s4, t0, fdt_prop_skip
+    mv s10, s5                  # save SPI base
+
+fdt_prop_skip:
+    # Advance past property data, aligned to 4 bytes
+    add s1, s1, s6
+    addi s1, s1, 3
+    andi s1, s1, -4
+    j fdt_walk
+
+fdt_walk_done:
+    # DTB walk complete. Check if we found SPI+SD (mmc under spi)
+    beqz s11, fdt_not_found     # no mmc@ node seen
+    beqz s10, fdt_not_found     # no spi@ base saved
+    mv a0, s10
+    li a1, 2                    # type = STORAGE_SPI_SD
+    j fdt_found
+
+fdt_not_found:
+    li a0, 0
+    li a1, 0                    # type = STORAGE_NONE
+
+fdt_found:
+    # a0 = MMIO base (or 0), a1 = storage type
+    ld ra, 0(sp)
+    ld s0, 8(sp)
+    ld s1, 16(sp)
+    ld s3, 24(sp)
+    ld s4, 32(sp)
+    ld s5, 40(sp)
+    ld s6, 48(sp)
+    ld s8, 56(sp)
+    ld s9, 64(sp)
+    ld s10, 72(sp)
+    ld s11, 80(sp)
+    addi sp, sp, 96
+    ret
+
+#============================================================
+# virtio_init: Initialize VirtIO block device at given MMIO base
+# a0 = MMIO base address (from fdt_find_storage)
+# Halts if a0 == 0. Stores MMIO base, struct base, and disk
+# function pointers in global data.
 #============================================================
 virtio_init:
     addi sp, sp, -48
@@ -2224,6 +2475,10 @@ virtio_init:
     sd s4, 24(sp)
     sd s5, 32(sp)
 
+    # a0 = MMIO base from fdt_find_storage; halt if 0
+    beqz a0, virtio_init_fail
+    mv s3, a0                    # s3 = MMIO base
+
     # Load VirtIO structures base: s4 = 0x80500000
     lui t0, 0x40280
     slli s4, t0, 1
@@ -2231,38 +2486,6 @@ virtio_init:
     # Load global data base: s5 = 0x80300000
     lui t0, 0x40180
     slli s5, t0, 1
-
-    # Scan MMIO addresses
-    lui s3, 0x10001          # s3 = 0x10001000
-
-virtio_scan_loop:
-    # Read MagicValue at offset 0
-    lw t0, 0(s3)
-    # Compare against 0x74726976
-    lui t1, 0x74727
-    addi t1, t1, -1674       # t1 = 0x74726976
-    bne t0, t1, virtio_scan_next
-
-    # Magic matches. Check DeviceID at offset 8
-    lw t0, 8(s3)
-    li t1, 2                  # block device
-    beq t0, t1, virtio_found
-
-virtio_scan_next:
-    # Advance to next MMIO slot (+0x1000)
-    lui t0, 1                 # t0 = 0x1000
-    add s3, s3, t0
-
-    # Check if past 0x10008000
-    lui t1, 0x10009
-    bne s3, t1, virtio_scan_loop
-
-    # Not found - print '!' and halt
-    li a0, 0x21
-    call sbi_putchar
-    j shutdown
-
-virtio_found:
     # Reset device
     sw zero, 0x70(s3)         # Status = 0
 
@@ -2328,7 +2551,7 @@ virtio_modern_setup:
     # Verify FEATURES_OK persisted
     lw t0, 0x70(s3)
     andi t0, t0, 8
-    beqz t0, shutdown
+    beqz t0, reboot
 
     # Zero structures area
     mv a0, s4
@@ -2370,11 +2593,25 @@ virtio_modern_setup:
     li t0, 0xF
     sw t0, 0x70(s3)
 
+    j virtio_init_done
+
+virtio_init_fail:
+    # Print '!' and halt — DTB did not provide a valid VirtIO address
+    li a0, 0x21
+    call sbi_putchar
+    j reboot
+
 virtio_init_done:
     # Store MMIO base in global data
     sd s3, 0(s5)              # globals+0x000 = mmio_base
     # Store struct base
     sd s4, 8(s5)              # globals+0x008 = struct_base
+
+    # Set disk I/O function pointers
+    la t0, virtio_read_sector
+    sd t0, 0x88(s5)           # globals+0x088 = disk_read_fn
+    la t0, virtio_write_sector
+    sd t0, 0x90(s5)           # globals+0x090 = disk_write_fn
 
     # Restore and return
     ld ra, 0(sp)
@@ -2384,6 +2621,30 @@ virtio_init_done:
     ld s5, 32(sp)
     addi sp, sp, 48
     ret
+
+#============================================================
+# disk_read_sector: Read one 512-byte sector via function pointer
+# a0 = sector number, a1 = destination buffer address
+# Returns: a0 = 0 on success
+# Dispatches through disk_read_fn at globals+0x088
+#============================================================
+disk_read_sector:
+    lui t0, 0x40180
+    slli t0, t0, 1              # t0 = 0x80300000
+    ld t0, 0x88(t0)             # disk_read_fn
+    jr t0
+
+#============================================================
+# disk_write_sector: Write one 512-byte sector via function pointer
+# a0 = sector number, a1 = source buffer address
+# Returns: a0 = 0 on success
+# Dispatches through disk_write_fn at globals+0x090
+#============================================================
+disk_write_sector:
+    lui t0, 0x40180
+    slli t0, t0, 1              # t0 = 0x80300000
+    ld t0, 0x90(t0)             # disk_write_fn
+    jr t0
 
 #============================================================
 # virtio_read_sector: Read one 512-byte sector from disk
@@ -2617,6 +2878,231 @@ virtio_write_poll:
     ret
 
 #============================================================
+# SPI+SD Driver (SiFive SPI controller + SD card over SPI)
+#
+# SiFive SPI registers (offsets from base):
+#   SCKDIV  0x00  Clock divisor
+#   SCKMODE 0x04  SPI mode (polarity/phase)
+#   CSID    0x10  Chip select ID
+#   CSDEF   0x14  CS default (active-low)
+#   CSMODE  0x18  CS mode (0=auto, 2=hold, 3=off)
+#   TXDATA  0x48  TX FIFO (bit 31 = full)
+#   RXDATA  0x4C  RX FIFO (bit 31 = empty)
+#   FCTRL   0x60  Flash interface control (must be 0 for raw SPI)
+#============================================================
+
+#============================================================
+# spi_transfer: Exchange one byte over SPI
+# a0 = byte to send
+# Returns: a0 = byte received
+# Expects SPI base in globals+0x098
+#============================================================
+spi_transfer:
+    lui t0, 0x40180
+    slli t0, t0, 1              # t0 = 0x80300000
+    ld t0, 0x98(t0)             # SPI base
+
+    # Wait for TX not full (bit 31 = 0)
+spi_tx_wait:
+    lw t1, 0x48(t0)             # TXDATA
+    bltz t1, spi_tx_wait        # bit 31 set = full
+    # Write byte
+    sw a0, 0x48(t0)
+
+    # Wait for RX not empty (bit 31 = 0)
+spi_rx_wait:
+    lw a0, 0x4C(t0)             # RXDATA
+    bltz a0, spi_rx_wait        # bit 31 set = empty
+    andi a0, a0, 0xFF
+    ret
+
+#============================================================
+# spi_sd_cmd: Send an SD command and get R1 response
+# a0 = command byte (0x40 | cmd_index)
+# a1 = 32-bit argument
+# a2 = CRC byte
+# Returns: a0 = R1 response byte
+#============================================================
+spi_sd_cmd:
+    addi sp, sp, -16
+    sd ra, 0(sp)
+    sd s0, 8(sp)
+
+    # spi_transfer only clobbers a0/t0/t1, so a1 (arg) and a2 (CRC) survive
+
+    # Send command byte (a0 already has it)
+    call spi_transfer
+
+    # Send 4 argument bytes (big-endian, a1 preserved across calls)
+    srli a0, a1, 24
+    andi a0, a0, 0xFF
+    call spi_transfer
+    srli a0, a1, 16
+    andi a0, a0, 0xFF
+    call spi_transfer
+    srli a0, a1, 8
+    andi a0, a0, 0xFF
+    call spi_transfer
+    andi a0, a1, 0xFF
+    call spi_transfer
+
+    # Send CRC byte (a2 preserved across calls)
+    mv a0, a2
+    call spi_transfer
+
+    # Poll for response (up to 8 bytes, wait for bit 7 = 0)
+    li s0, 8
+spi_sd_cmd_poll:
+    li a0, 0xFF
+    call spi_transfer
+    andi t0, a0, 0x80
+    beqz t0, spi_sd_cmd_done       # bit 7 clear = valid R1 response
+    addi s0, s0, -1
+    bnez s0, spi_sd_cmd_poll
+    li a0, 0xFF                 # timeout
+
+spi_sd_cmd_done:
+    ld ra, 0(sp)
+    ld s0, 8(sp)
+    addi sp, sp, 16
+    ret
+
+#============================================================
+# spi_sd_init: Configure SPI+SD for stage 2 use
+# a0 = SPI controller MMIO base (from fdt_find_storage)
+# Stage 1 already initialized the SD card. This just stores
+# the SPI base in globals and sets disk function pointers.
+#============================================================
+spi_sd_init:
+    # Leaf function — no calls, no stack needed
+
+    # Store SPI base in globals
+    lui t0, 0x40180
+    slli t0, t0, 1              # t0 = 0x80300000
+    sd a0, 0x98(t0)             # globals+0x098 = spi_base
+    sd a0, 0(t0)                # globals+0x000 = mmio_base (reuse)
+
+    # Set disk function pointers
+    la t1, spi_sd_read_sector
+    sd t1, 0x88(t0)             # disk_read_fn
+    la t1, spi_sd_write_sector
+    sd t1, 0x90(t0)             # disk_write_fn
+
+    ret
+
+#============================================================
+# spi_sd_read_sector: Read one 512-byte sector from SD card
+# a0 = sector number, a1 = destination buffer address
+# Returns: a0 = 0 on success
+#============================================================
+spi_sd_read_sector:
+    addi sp, sp, -24
+    sd ra, 0(sp)
+    sd s0, 8(sp)
+    sd s3, 16(sp)
+
+    mv s0, a1                   # s0 = buffer
+    mv s3, a0                   # s3 = sector
+
+    # CMD17: READ_SINGLE_BLOCK (byte address = sector * 512)
+    li a0, 0x51                 # CMD17 = 0x40 | 17
+    slli a1, s3, 9              # sector * 512 for byte addressing
+    li a2, 0xFF
+    call spi_sd_cmd
+
+    # Wait for data token (0xFE)
+    # First 0xFF consumes the bridge RESPONSE→DATA_START transition
+spi_sd_read_wait_token:
+    li a0, 0xFF
+    call spi_transfer
+    li t0, 0xFE
+    bne a0, t0, spi_sd_read_wait_token
+
+    # Read 512 bytes
+    li s3, 512
+spi_sd_read_loop:
+    li a0, 0xFF
+    call spi_transfer
+    sb a0, 0(s0)
+    addi s0, s0, 1
+    addi s3, s3, -1
+    bnez s3, spi_sd_read_loop
+
+    # Read 2 CRC bytes (discard)
+    li a0, 0xFF
+    call spi_transfer
+    li a0, 0xFF
+    call spi_transfer
+
+    li a0, 0                    # success
+
+    ld ra, 0(sp)
+    ld s0, 8(sp)
+    ld s3, 16(sp)
+    addi sp, sp, 24
+    ret
+
+#============================================================
+# spi_sd_write_sector: Write one 512-byte sector to SD card
+# a0 = sector number, a1 = source buffer address
+# Returns: a0 = 0 on success
+#============================================================
+spi_sd_write_sector:
+    addi sp, sp, -24
+    sd ra, 0(sp)
+    sd s0, 8(sp)
+    sd s3, 16(sp)
+
+    mv s0, a1                   # s0 = buffer
+    mv s3, a0                   # s3 = sector
+
+    # CMD24: WRITE_SINGLE_BLOCK (byte address = sector * 512)
+    li a0, 0x58                 # CMD24 = 0x40 | 24
+    slli a1, s3, 9              # sector * 512 for byte addressing
+    li a2, 0xFF
+    call spi_sd_cmd
+
+    # Send data token (0xFE)
+    # First 0xFF consumes the RESPONSE→CMD transition, then 0xFE starts write
+    li a0, 0xFF
+    call spi_transfer
+    li a0, 0xFE
+    call spi_transfer
+
+    # Write 512 bytes
+    li s3, 512
+spi_sd_write_loop:
+    lbu a0, 0(s0)
+    call spi_transfer
+    addi s0, s0, 1
+    addi s3, s3, -1
+    bnez s3, spi_sd_write_loop
+
+    # Send 2 dummy CRC bytes
+    li a0, 0xFF
+    call spi_transfer
+    li a0, 0xFF
+    call spi_transfer
+
+    # Wait for data response token
+    li a0, 0xFF
+    call spi_transfer
+
+    # Wait while card is busy (DO = 0x00)
+spi_sd_write_busy:
+    li a0, 0xFF
+    call spi_transfer
+    beqz a0, spi_sd_write_busy
+
+    li a0, 0                    # success
+
+    ld ra, 0(sp)
+    ld s0, 8(sp)
+    ld s3, 16(sp)
+    addi sp, sp, 24
+    ret
+
+#============================================================
 # internalshell: Main command loop (runs in S-mode, paging OFF)
 # Reads commands from stdin (disk) and dispatches them
 #============================================================
@@ -2688,7 +3174,7 @@ shell_done:
     call flush_disk
 
     # Shutdown
-    j shutdown
+    j reboot
 
 #============================================================
 # handle_flush: 'f' command - enable disk flushing
@@ -3429,7 +3915,7 @@ flush_sector_loop:
     # Write 512 bytes from s0 to disk sector s2
     mv a0, s2                # sector number
     mv a1, s0                # source buffer
-    call virtio_write_sector
+    call disk_write_sector
 
     addi s0, s0, 512
     addi s1, s1, -512
@@ -3452,8 +3938,9 @@ main:
     lui t0, 0x54000
     slli sp, t0, 1
 
-    # Save a0 = stdin_sector from stage1 bootloader
+    # Save a0 = stdin_sector and a1 = DTB pointer from stage1
     mv s6, a0
+    mv s7, a1
 
     # Load RAM base into s2 = 0x80210000
     call load_ram_base
@@ -3466,8 +3953,25 @@ main:
     # Disable all S-mode interrupts (timer, external, software)
     csrrw zero, sie, zero
 
-    # Initialize VirtIO block device
+    # Parse device tree to find storage device
+    mv a0, s7
+    call fdt_find_storage        # a0 = MMIO base, a1 = type
+
+    # Dispatch to appropriate storage driver
+    li t0, 1
+    beq a1, t0, init_virtio      # type 1 = VirtIO
+    li t0, 2
+    beq a1, t0, init_spi_sd      # type 2 = SPI+SD
+    j reboot                      # unknown storage: reboot (halt)
+
+init_virtio:
     call virtio_init
+    j storage_ready
+
+init_spi_sd:
+    call spi_sd_init
+
+storage_ready:
 
     # --- Initialize filesystem ---
 
@@ -3498,6 +4002,9 @@ main:
 
     # have_userspace = 0
     sd zero, 0x50(t0)
+
+    # Store DTB pointer in globals for future use
+    sd s7, 0x80(t0)
 
     # Initialize brk = 0x80700000 (PA, 1MB above ELF base)
     lui t1, 0x40380

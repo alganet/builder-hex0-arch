@@ -11,17 +11,46 @@ on:
     branches:
       - main
 
+env:
+  QEMU_VERSION: "10.1.4"
+
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install QEMU RISC-V
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-misc
+          sudo apt-get install -y libglib2.0-dev libpixman-1-dev libslirp-dev \
+            ninja-build flex python3-venv
+
+      - name: Cache QEMU
+        id: cache-qemu
+        uses: actions/cache@v4
+        with:
+          path: qemu-local
+          key: qemu-riscv64-${{ env.QEMU_VERSION }}
+
+      - name: Build QEMU (riscv64 only)
+        if: steps.cache-qemu.outputs.cache-hit != 'true'
+        run: |
+          pip install meson
+          git clone --depth 1 --branch v${{ env.QEMU_VERSION }} \
+            https://gitlab.com/qemu-project/qemu.git /tmp/qemu-build
+          cd /tmp/qemu-build
+          ./configure --target-list=riscv64-softmmu \
+            --prefix=${{ github.workspace }}/qemu-local \
+            --disable-docs --disable-gtk --disable-sdl \
+            --disable-opengl --disable-virglrenderer
+          make -j$(nproc)
+          make install
+          rm -rf /tmp/qemu-build
+
+      - name: Verify QEMU
+        run: qemu-local/bin/qemu-system-riscv64 --version
 
       - run: make clean && make
 
-      - run: make test
+      - run: QEMU=qemu-local/bin/qemu-system-riscv64 make test
