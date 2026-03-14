@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install QEMU RISC-V
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-misc
+
+      - run: make clean && make
+
+      - run: make test
