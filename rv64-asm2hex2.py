@@ -8,7 +8,7 @@ Labels become hex2 label definitions (:name).
 Branch targets become hex2 relative references (@label).
 Jump targets become hex2 absolute references ($label).
 
-Usage: python3 rv64-asm2hex2.py < kernel.S > kernel.hex2
+Usage: python3 rv64-asm2hex2.py < builder-hex0-riscv64-stage2.S > builder-hex0-riscv64-stage2.hex2
 """
 import sys
 import re

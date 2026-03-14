@@ -1,0 +1,196 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builder-hex0 RISC-V 64-bit Stage 1 (512 bytes)
+#
+# Minimal hex0 compiler bootloader. Loaded at 0x80200000 by OpenSBI.
+# Reads hex0 source from disk sector 0, compiles to binary at 0x80210000,
+# jumps there with a0 = next disk sector (filesystem start).
+#
+# Registers:
+#   s0 = hex state (0=first nibble, 1=have first)
+#   s1 = current disk sector
+#   s2 = offset in buffer (0-511, init 512 to force read)
+#   s3 = VirtIO MMIO base
+#   s4 = VirtIO struct base (0x80500000)
+#   s5 = output write pointer
+#   s6 = high nibble accumulator
+#   s7 = sector buffer (s4+0x3000)
+#   s9 = saved ra in next_byte
+
+#:_start
+b7 02 00 54  # lui t0, 0x54000
+13 91 12 00  # slli sp, t0, 1
+b7 02 28 40  # lui t0, 0x40280
+13 9a 12 00  # slli s4, t0, 1
+
+# Scan MMIO 0x10001000..0x10008000 for VirtIO block device
+b7 19 00 10  # lui s3, 0x10001
+#:scan
+83 a2 09 00  # lw t0, 0(s3)
+37 73 72 74  # lui t1, 0x74727
+13 03 63 97  # addi t1, t1, -1674
+63 98 62 00  # bne t0, t1, scan_next
+83 a2 89 00  # lw t0, 8(s3)
+13 03 20 00  # li t1, 2
+63 8c 62 00  # beq t0, t1, found
+#:scan_next
+b7 12 00 00  # lui t0, 1
+b3 89 59 00  # add s3, s3, t0
+37 93 00 10  # lui t1, 0x10009
+e3 9c 69 fc  # bne s3, t1, scan
+6f 00 80 1b  # j halt
+
+#:found
+# Legacy VirtIO v1 init (device starts in reset state)
+93 02 30 00  # li t0, 3
+23 a8 59 06  # sw t0, 0x70(s3)
+b7 12 00 00  # lui t0, 1
+23 a4 59 02  # sw t0, 0x28(s3)
+23 ae 59 02  # sw t0, 0x3C(s3)
+93 02 80 00  # li t0, 8
+23 ac 59 02  # sw t0, 0x38(s3)
+93 52 ca 00  # srli t0, s4, 12
+23 a0 59 04  # sw t0, 0x40(s3)
+93 02 70 00  # li t0, 7
+23 a8 59 06  # sw t0, 0x70(s3)
+
+# s7 = sector buffer at s4+0x3000
+b7 32 00 00  # lui t0, 3
+b3 0b 5a 00  # add s7, s4, t0
+
+# Init compiler state
+b7 82 10 40  # lui t0, 0x40108
+93 9a 12 00  # slli s5, t0, 1
+13 04 00 00  # li s0, 0
+93 04 00 00  # li s1, 0
+13 09 00 20  # li s2, 512
+
+# --- Hex0 main loop ---
+#:hex0_loop
+ef 00 40 09  # jal ra, next_byte
+63 80 02 08  # beqz t0, hex0_done
+# Whitespace: anything <= 0x20
+13 03 10 02  # li t1, 0x21
+e3 ca 62 fe  # blt t0, t1, hex0_loop
+# Comments
+13 03 30 02  # li t1, 0x23
+63 8e 62 04  # beq t0, t1, skip_comment
+13 03 b0 03  # li t1, 0x3B
+63 8a 62 04  # beq t0, t1, skip_comment
+# Force uppercase: if >= 'a', subtract 0x20
+13 03 10 06  # li t1, 0x61
+63 c4 62 00  # blt t0, t1, no_lower
+93 82 02 fe  # addi t0, t0, -0x20
+#:no_lower
+# Parse hex: '0'-'9' then 'A'-'F'
+13 83 02 fd  # addi t1, t0, -0x30
+e3 48 03 fc  # bltz t1, hex0_loop
+93 03 a0 00  # li t2, 10
+63 4a 73 00  # blt t1, t2, got_nibble
+13 03 f3 fe  # addi t1, t1, -17
+93 03 60 00  # li t2, 6
+e3 7e 73 fa  # bgeu t1, t2, hex0_loop
+13 03 a3 00  # addi t1, t1, 10
+#:got_nibble
+# t1 = nibble (0-15)
+63 18 04 00  # bnez s0, second_nibble
+13 1b 43 00  # slli s6, t1, 4
+13 04 10 00  # li s0, 1
+6f f0 9f fa  # j hex0_loop
+#:second_nibble
+33 63 6b 00  # or t1, s6, t1
+23 80 6a 00  # sb t1, 0(s5)
+93 8a 1a 00  # addi s5, s5, 1
+13 04 00 00  # li s0, 0
+6f f0 5f f9  # j hex0_loop
+
+#:skip_comment
+ef 00 40 02  # jal ra, next_byte
+63 88 02 00  # beqz t0, hex0_done
+13 03 a0 00  # li t1, 0x0A
+e3 9a 62 fe  # bne t0, t1, skip_comment
+6f f0 1f f8  # j hex0_loop
+
+#:hex0_done
+13 85 04 00  # mv a0, s1
+b7 82 10 40  # lui t0, 0x40108
+93 92 12 00  # slli t0, t0, 1
+67 80 02 00  # jalr zero, t0, 0
+
+# --- next_byte: return next byte in t0 ---
+#:next_byte
+93 02 00 20  # li t0, 512
+63 4c 59 00  # blt s2, t0, nb_ready
+93 8c 00 00  # mv s9, ra
+ef 00 00 02  # jal ra, read_sector
+93 80 0c 00  # mv ra, s9
+93 84 14 00  # addi s1, s1, 1
+13 09 00 00  # li s2, 0
+#:nb_ready
+b3 82 2b 01  # add t0, s7, s2
+83 c2 02 00  # lbu t0, 0(t0)
+13 09 19 00  # addi s2, s2, 1
+67 80 00 00  # ret
+
+# --- read_sector: read sector s1 via VirtIO into s7 ---
+# Descriptors set up fresh each call. Uses s3, s4, s7.
+#:read_sector
+# Header at s4+0x2000
+b7 23 00 00  # lui t2, 2
+b3 03 7a 00  # add t2, s4, t2
+23 b4 93 00  # sd s1, 8(t2)
+
+# Descriptor 0: header (s4+0x2000, 16B, NEXT, next=1)
+23 30 7a 00  # sd t2, 0(s4)
+93 02 00 01  # li t0, 16
+23 24 5a 00  # sw t0, 8(s4)
+93 02 10 00  # li t0, 1
+23 16 5a 00  # sh t0, 12(s4)
+23 17 5a 00  # sh t0, 14(s4)
+
+# Descriptor 1: data (s7, 512B, NEXT|WRITE, next=2)
+23 38 7a 01  # sd s7, 16(s4)
+93 02 00 20  # li t0, 512
+23 2c 5a 00  # sw t0, 24(s4)
+93 02 30 00  # li t0, 3
+23 1e 5a 00  # sh t0, 28(s4)
+93 02 20 00  # li t0, 2
+23 1f 5a 00  # sh t0, 30(s4)
+
+# Descriptor 2: status (s4+0x2010, 1B, WRITE)
+93 82 03 01  # addi t0, t2, 0x10
+23 30 5a 02  # sd t0, 32(s4)
+93 02 10 00  # li t0, 1
+23 24 5a 02  # sw t0, 40(s4)
+93 02 20 00  # li t0, 2
+23 16 5a 02  # sh t0, 44(s4)
+23 17 0a 02  # sh zero, 46(s4)
+
+# Save used.idx, update avail ring
+b7 12 00 00  # lui t0, 1
+b3 02 5a 00  # add t0, s4, t0
+03 d3 22 00  # lhu t1, 2(t0)
+93 02 0a 08  # addi t0, s4, 0x80
+03 d5 22 00  # lhu a0, 2(t0)
+93 73 75 00  # andi t2, a0, 7
+93 93 13 00  # slli t2, t2, 1
+93 83 43 00  # addi t2, t2, 4
+b3 83 72 00  # add t2, t0, t2
+23 90 03 00  # sh zero, 0(t2)
+13 05 15 00  # addi a0, a0, 1
+23 91 a2 00  # sh a0, 2(t0)
+
+0f 00 f0 0f  # fence
+23 a8 09 04  # sw zero, 0x50(s3)
+
+b7 12 00 00  # lui t0, 1
+b3 02 5a 00  # add t0, s4, t0
+#:rs_poll
+0f 00 f0 0f  # fence
+03 d5 22 00  # lhu a0, 2(t0)
+e3 0c 65 fe  # beq a0, t1, rs_poll
+67 80 00 00  # ret
+
+#:halt
+6f 00 00 00  # j halt

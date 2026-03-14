@@ -1,22 +1,22 @@
 # SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builder-hex0 RISC-V 64-bit Kernel
+# Builder-hex0 RISC-V 64-bit Stage 2
 #
 # A minimal kernel for bootstrapping compilers from source on RISC-V.
 # Inspired by builder-hex0 (https://github.com/ironmeld/builder-hex0).
 #
 # Boot: qemu-system-riscv64 -machine virt -m 2G -nographic \
-#       -kernel builder-hex0-riscv64.bin \
+#       -kernel builder-hex0-riscv64-stage1.bin \
 #       -drive file=disk.img,format=raw,if=none,id=hd0 \
 #       -device virtio-blk-device,drive=hd0 --no-reboot
 #
-# Flat binary loaded at 0x80200000 by OpenSBI in S-mode.
-# On entry: a0 = hartid, a1 = FDT pointer
+# Compiled by stage 1 from hex0 source on disk to 0x80210000.
+# On entry: a0 = next disk sector (filesystem start)
 #
 # Memory layout (physical addresses):
 #   0x80100000  Sv39 root page table (4KB)
-#   0x80200000  Kernel code (base, s2 points here)
+#   0x80210000  Kernel code (base, s2 points here)
 #   0x80300000  Kernel global data (variables)
 #   0x80400000  Process descriptors (16 x 4096)
 #   0x80500000  VirtIO structures (desc/avail/used/buffers)
@@ -84,7 +84,7 @@
 #   +0x3000: Sector buffer (512 bytes)
 #
 # Register conventions:
-#   s2 = RAM base (0x80200000), set during boot
+#   s2 = RAM base (0x80210000), set during boot
 #   s3 = VirtIO MMIO base, available during boot
 #   s4 = VirtIO struct base (0x80500000), available during boot
 #   s5 = global data base (0x80300000), available during boot
@@ -96,7 +96,7 @@ _start:
     jal zero, main
 
 #============================================================
-# Trap handler (at offset 4 = address 0x80200004)
+# Trap handler (at offset 4 = address 0x80210004)
 # Entered on ecall from U-mode (scause = 8)
 #============================================================
 trap_handler:
@@ -1759,10 +1759,10 @@ print_string_done:
     ret
 
 #============================================================
-# load_ram_base: Load 0x80200000 into s2
+# load_ram_base: Load 0x80210000 into s2
 #============================================================
 load_ram_base:
-    lui t0, 0x40100
+    lui t0, 0x40108
     slli s2, t0, 1
     ret
 
@@ -3452,7 +3452,10 @@ main:
     lui t0, 0x54000
     slli sp, t0, 1
 
-    # Load RAM base into s2 = 0x80200000
+    # Save a0 = stdin_sector from stage1 bootloader
+    mv s6, a0
+
+    # Load RAM base into s2 = 0x80210000
     call load_ram_base
 
     # Set up trap handler early (before any MMIO access)
@@ -3501,8 +3504,8 @@ main:
     slli t1, t1, 1            # t1 = 0x80700000
     sd t1, 0x40(t0)
 
-    # Initialize stdin_sector = 0, stdin_offset = 512 (force first read)
-    sd zero, 0x30(t0)
+    # Initialize stdin_sector from stage1 (a0 saved in s6), offset = 512 (force first read)
+    sd s6, 0x30(t0)
     li t1, 512
     sd t1, 0x38(t0)
 

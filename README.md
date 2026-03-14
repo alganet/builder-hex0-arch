@@ -10,13 +10,32 @@ A minimal bootable kernel for bootstrapping compilers from source on RISC-V 64-b
 Inspired by [builder-hex0](https://github.com/ironmeld/builder-hex0) by Rick Masters.
 
 Builder-hex0 is a bootable disk image containing a kernel, shell, and hex0 compiler.
-The x86 original fits in under 4KB of binary. This RISC-V port is ~8KB and runs
-in QEMU's `virt` machine with OpenSBI providing firmware services.
+The x86 original fits in under 4KB of binary. This RISC-V port uses a two-stage
+design and runs in QEMU's `virt` machine with OpenSBI providing firmware services.
+
+
+## Two-Stage Architecture
+
+Like the x86 original, the kernel boots in two stages:
+
+* **Stage 1** (`builder-hex0-riscv64-stage1.S`, 508 bytes): Minimal hex0 compiler
+  bootloader loaded at `0x80200000` by OpenSBI. Reads hex0 source from disk,
+  compiles it to binary at `0x80210000`, and jumps there. Passes the next disk
+  sector number to stage 2 via register `a0`.
+
+* **Stage 2** (`builder-hex0-riscv64-stage2.S`, ~8KB): Full kernel with VirtIO
+  driver, Sv39 paging, syscalls, process simulation, filesystem, and internal
+  shell. Stored on disk as human-readable hex0 source, compiled at boot time
+  by stage 1.
+
+This design minimizes the binary seed to 508 bytes. The rest of the kernel is
+readable hex0 source on disk, maximizing bootstrappability.
 
 
 ## Features
 
-* ~8KB flat binary kernel, written in RISC-V assembly (kernel.S)
+* Two-stage boot: 508-byte binary seed + ~25KB hex0 source
+* ~8KB stage 2 kernel, written in RISC-V assembly
 * Runs in S-mode under OpenSBI (analogous to x86 builder-hex0 running under BIOS)
 * VirtIO-MMIO block device driver for disk I/O
 * Sv39 virtual memory with gigapage mappings
@@ -35,12 +54,19 @@ Requires Python 3 and a C compiler (for the hex2 linker):
 make
 ```
 
-This runs the build chain: `kernel.S` -> `kernel.hex2` -> `builder-hex0-riscv64.bin`
+This produces:
+* `builder-hex0-riscv64-stage1.bin` — stage 1 bootloader (loaded by QEMU via `-kernel`)
+* `builder-hex0-riscv64-stage2.hex0` — stage 2 kernel as hex0 source (placed on disk)
+
+To produce commented hex0 from hex2 (for review/audit):
+```
+make builder-hex0-riscv64-stage1.hex0
+```
 
 
 ## Testing
 
-Boot with an empty disk image to verify the kernel starts and shuts down:
+Boot with stage2.hex0 on disk to verify two-stage boot works:
 
 ```
 make test
@@ -51,14 +77,22 @@ make test
 
 ```
 qemu-system-riscv64 -machine virt -m 2G -nographic \
-    -kernel builder-hex0-riscv64.bin \
+    -kernel builder-hex0-riscv64-stage1.bin \
     -drive file=disk.img,format=raw,if=none,id=hd0 \
     -device virtio-blk-device,drive=hd0 \
     --no-reboot
 ```
 
 OpenSBI is loaded automatically by QEMU and provides firmware services.
-The kernel is loaded at `0x80200000` in S-mode.
+Stage 1 is loaded at `0x80200000` in S-mode. It compiles stage 2 from
+hex0 source on disk to `0x80210000` and jumps there.
+
+### Disk Layout
+
+```
+Sector 0..N:   stage 2 kernel hex0 source (null-terminated)
+Sector N+1..:  filesystem data (src/putdir/putfile entries)
+```
 
 
 ## Machine Requirements
@@ -96,7 +130,8 @@ Implements the RISC-V Linux syscall ABI (`ecall` with syscall number in `a7`):
 ## The Builder Shell
 
 The internal shell reads commands from standard input, which the kernel provides
-by reading the disk image starting after any binary header.
+by reading the disk image starting after the hex0 source (at the sector passed
+by stage 1 in `a0`).
 
 Built-in commands:
 * `src N filename` - read N bytes from stdin into a file
@@ -108,12 +143,13 @@ Built-in commands:
 
 | Aspect | x86 | RISC-V |
 |--------|-----|--------|
-| Boot | MBR/BIOS (stage1+stage2) | QEMU `-kernel` with OpenSBI |
+| Boot | MBR/BIOS (stage1+stage2) | QEMU `-kernel` stage1 + hex0 stage2 on disk |
+| Binary seed | 192 bytes | 508 bytes |
 | Privilege | 32-bit protected mode | S-mode with Sv39 paging |
 | Console | BIOS int 10h | SBI putchar |
 | Disk | BIOS int 13h (LBA) | VirtIO-MMIO block device |
 | Shutdown | Triple fault | SBI SRST |
-| Binary size | ~4KB | ~8KB |
+| Stage 2 size | ~4KB | ~8KB |
 | ELF format | 32-bit | 64-bit |
 | Syscall ABI | int 0x80, x86 numbers | ecall, RISC-V Linux numbers |
 

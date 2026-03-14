@@ -4,46 +4,71 @@
 
 # Makefile for builder-hex0-riscv64
 #
-# Build chain: kernel.S -> kernel.hex2 -> builder-hex0-riscv64.bin
-#
-# The assembly-to-hex2 conversion uses a Python tool (rv64-asm2hex2.py).
-# The hex2-to-binary step uses a vendored C hex2 linker (hex2/).
+# Two-stage build:
+#   builder-hex0-riscv64-stage1.S -> .hex2 -> .bin  (minimal hex0 bootloader, <=512 bytes)
+#   builder-hex0-riscv64-stage2.S -> .hex2 -> .bin -> .hex0  (full kernel as hex0 source)
 
 PYTHON3 ?= python3
 HEX2 = hex2/hex2
-BASE_ADDRESS = 0x80200000
-BIN = builder-hex0-riscv64.bin
-HEX2_SRC = kernel.hex2
-ASM_SRC = kernel.S
 
 QEMU ?= qemu-system-riscv64
 
-all: $(BIN)
+STAGE1 = builder-hex0-riscv64-stage1
+STAGE2 = builder-hex0-riscv64-stage2
+
+all: $(STAGE1).hex0 $(STAGE1).bin $(STAGE2).hex0
 
 $(HEX2):
 	$(MAKE) -C hex2
 
-$(HEX2_SRC): $(ASM_SRC) rv64-asm2hex2.py asm.py
-	$(PYTHON3) rv64-asm2hex2.py < $(ASM_SRC) > $(HEX2_SRC)
+# --- Stage 1: minimal hex0 bootloader ---
 
-$(BIN): $(HEX2_SRC) $(HEX2)
-	$(HEX2) -f $(HEX2_SRC) --architecture riscv64 \
-		--base-address $(BASE_ADDRESS) --little-endian -o $(BIN)
+$(STAGE1).hex2: $(STAGE1).S rv64-asm2hex2.py asm.py
+	$(PYTHON3) rv64-asm2hex2.py < $(STAGE1).S > $(STAGE1).hex2
 
-# Boot with an empty disk image to verify the kernel starts and shuts down.
-test: $(BIN)
-	dd if=/dev/zero of=/tmp/bh0-rv64-test.img bs=512 count=2 2>/dev/null
-	timeout 10 $(QEMU) -machine virt -m 2G -nographic \
-		-kernel $(BIN) \
-		-drive file=/tmp/bh0-rv64-test.img,format=raw,if=none,id=hd0 \
+$(STAGE1).bin: $(STAGE1).hex2 $(HEX2)
+	$(HEX2) -f $(STAGE1).hex2 --architecture riscv64 \
+		--base-address 0x80200000 --little-endian -o $(STAGE1).bin
+
+$(STAGE1).hex0: $(STAGE1).hex2 $(STAGE1).bin hex2tohex0.py
+	$(PYTHON3) hex2tohex0.py $(STAGE1).hex2 $(STAGE1).bin $(STAGE1).hex0
+
+# --- Stage 2: full kernel compiled to hex0 ---
+
+$(STAGE2).hex2: $(STAGE2).S rv64-asm2hex2.py asm.py
+	$(PYTHON3) rv64-asm2hex2.py < $(STAGE2).S > $(STAGE2).hex2
+
+$(STAGE2).bin: $(STAGE2).hex2 $(HEX2)
+	$(HEX2) -f $(STAGE2).hex2 --architecture riscv64 \
+		--base-address 0x80210000 --little-endian -o $(STAGE2).bin
+
+$(STAGE2).hex0: $(STAGE2).hex2 $(STAGE2).bin hex2tohex0.py
+	$(PYTHON3) hex2tohex0.py $(STAGE2).hex2 $(STAGE2).bin $(STAGE2).hex0
+
+# --- Tests ---
+
+test: test-stage1 test-boot
+
+# Stage 1: verify bootloader fits in 512 bytes
+test-stage1: $(STAGE1).bin
+	@size=$$(wc -c < $(STAGE1).bin); \
+	if [ $$size -le 512 ]; then echo "PASS: stage1 $$size bytes (<= 512)"; \
+	else echo "FAIL: stage1 $$size bytes (> 512)"; exit 1; fi
+
+# Two-stage boot: stage1 compiles stage2.hex0 from disk, kernel runs and shuts down
+test-boot: $(STAGE1).bin $(STAGE2).hex0
+	dd if=$(STAGE2).hex0 of=test.img bs=512 conv=sync 2>/dev/null
+	dd if=/dev/zero bs=512 count=4 >> test.img 2>/dev/null
+	$(QEMU) -machine virt -m 2G -nographic \
+		-kernel $(STAGE1).bin \
+		-drive file=test.img,format=raw,if=none,id=hd0 \
 		-device virtio-blk-device,drive=hd0 \
-		--no-reboot; \
-	rc=$$?; rm -f /tmp/bh0-rv64-test.img; \
-	if [ $$rc -eq 0 ]; then echo "PASS: kernel booted and shut down cleanly"; \
-	else echo "FAIL: exit code $$rc"; exit 1; fi
+		--no-reboot
 
 clean:
-	rm -f $(BIN) $(HEX2_SRC)
+	rm -f $(STAGE1).hex2 $(STAGE1).bin $(STAGE1).hex0
+	rm -f $(STAGE2).hex2 $(STAGE2).bin $(STAGE2).hex0
+	rm -f test.img
 	$(MAKE) -C hex2 clean
 
-.PHONY: all test clean
+.PHONY: all test test-stage1 test-boot clean
