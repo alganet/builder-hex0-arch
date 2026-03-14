@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+hex2/hex2
+*.o
+*.bin
