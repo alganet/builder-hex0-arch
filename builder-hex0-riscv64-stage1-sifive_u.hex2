@@ -1,0 +1,313 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builder-hex0 RISC-V 64-bit Stage 1 — SiFive HiFive Unleashed (sifive_u)
+#
+# Board-specific hex0 compiler bootloader for sifive_u.
+# Loaded at 0x80200000 by OpenSBI (a0=hartid, a1=dtb_ptr).
+# Reads hex0 source from SD card via SiFive SPI controller,
+# compiles to binary at 0x80210000, jumps there with
+# a0 = next disk sector, a1 = DTB pointer.
+#
+# SiFive SPI controller at 0x10050000 (SPI2, SD card slot).
+# SD card uses SPI mode protocol.
+#
+# Registers:
+#   s0 = hex state (0=first nibble, 1=have first)
+#   s1 = current disk sector
+#   s2 = offset in buffer (0-511, init 512 to force read)
+#   s3 = SPI controller MMIO base (0x10050000)
+#   s5 = output write pointer
+#   s6 = high nibble accumulator
+#   s7 = sector buffer (same as s4 for compat)
+#   s8 = DTB pointer (from OpenSBI a1)
+#   s9 = saved ra in next_byte
+
+:_start
+# Park non-boot harts (sifive_u boot hart = 1)
+.80020000 .00001000 13000000  # li t0, 1
+.00000500 .00005000 @boot 63000000  # beq a0, t0, boot
+:park_hart
+$park_hart 6F000000  # j park_hart
+:boot
+.000C0000 .00800500 13000000  # mv s8, a1
+.80020000 .00000054 37000000  # lui t0, 0x54000
+.00010000 .00800200 .00001000 13100000  # slli sp, t0, 1
+
+# SPI base = 0x10050000
+.80090000 .00000510 37000000  # lui s3, 0x10050
+
+# Buffer area at 0x80503000 (reuse VirtIO struct area)
+.80020000 .00002840 37000000  # lui t0, 0x40280
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00030000 .00300000 37000000  # lui t1, 3
+.800B0000 .00800200 .00006000 33000000  # add s7, t0, t1
+
+# --- SPI controller init ---
+
+# Disable flash mode (FCTRL = 0)
+.00800900 .00000000 .00000006 23200000  # sw zero, 0x60(s3)
+
+# Slow clock for SD init: SCKDIV = 0x3F
+.80020000 .0000F003 13000000  # li t0, 0x3F
+.00800900 .00005000 .00000000 23200000  # sw t0, 0x00(s3)
+
+# SPI mode 0: SCKMODE = 0
+.00800900 .00000000 .00020000 23200000  # sw zero, 0x04(s3)
+
+# Select CS 0: CSID = 0
+.00800900 .00000000 .00080000 23200000  # sw zero, 0x10(s3)
+
+# CS default = all high: CSDEF = 1
+.80020000 .00001000 13000000  # li t0, 1
+.00800900 .00005000 .000A0000 23200000  # sw t0, 0x14(s3)
+
+# CS mode = off (manual): CSMODE = 3
+.80020000 .00003000 13000000  # li t0, 3
+.00800900 .00005000 .000C0000 23200000  # sw t0, 0x18(s3)
+
+# Send 80+ clock cycles with CS deasserted (SD warmup)
+.80030000 .0000A000 13000000  # li t2, 10
+:warmup
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.80030000 .00800300 .0000F0FF 13000000  # addi t2, t2, -1
+.00800300 @warmup 63100000  # bnez t2, warmup
+
+# Assert CS: CSMODE = hold (2)
+.80020000 .00002000 13000000  # li t0, 2
+.00800900 .00005000 .000C0000 23200000  # sw t0, 0x18(s3)
+
+# --- SD card init ---
+# Each sd_cmd is followed by a flush byte (0xFF) to consume the
+# ssi-sd bridge's RESPONSE→CMD state transition.
+
+# CMD0: GO_IDLE_STATE
+.00050000 .00000004 13000000  # li a0, 0x40
+.80050000 .00000000 13000000  # li a1, 0
+.00060000 .00005009 13000000  # li a2, 0x95
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+# CMD8: SEND_IF_COND (0x1AA)
+.00050000 .00008004 13000000  # li a0, 0x48
+.80050000 .0000A01A 13000000  # li a1, 0x1AA
+.00060000 .00007008 13000000  # li a2, 0x87
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+# Read 4 bytes of R7 (discard) + flush
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+# ACMD41 loop: CMD55 + ACMD41 with HCS + voltage bits
+:acmd41_loop
+.00050000 .00007007 13000000  # li a0, 0x77
+.80050000 .00000000 13000000  # li a1, 0
+.00060000 .0000F00F 13000000  # li a2, 0xFF
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+.00050000 .00009006 13000000  # li a0, 0x69
+.80050000 .0080FF40 37000000  # lui a1, 0x40FF8
+.00060000 .0000F00F 13000000  # li a2, 0xFF
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+.000D0000 .00000500 13000000  # mv s10, a0
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00000D00 @acmd41_loop 63100000  # bnez s10, acmd41_loop
+
+# CMD9: SEND_CSD (transitions card to transfer state in SPI mode)
+.00050000 .00009004 13000000  # li a0, 0x49
+.80050000 .00000000 13000000  # li a1, 0
+.00060000 .0000F00F 13000000  # li a2, 0xFF
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+# Skip token + 16-byte CSD + 2-byte CRC = ~20 bytes
+.80030000 .00004001 13000000  # li t2, 20
+:skip_csd
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.80030000 .00800300 .0000F0FF 13000000  # addi t2, t2, -1
+.00800300 @skip_csd 63100000  # bnez t2, skip_csd
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+# Speed up: SCKDIV = 3
+.80020000 .00003000 13000000  # li t0, 3
+.00800900 .00005000 .00000000 23200000  # sw t0, 0x00(s3)
+
+# --- Hex0 compiler ---
+
+# Init compiler state
+.80020000 .00801040 37000000  # lui t0, 0x40108
+.800A0000 .00800200 .00001000 13100000  # slli s5, t0, 1
+.00040000 .00000000 13000000  # li s0, 0
+.80040000 .00000000 13000000  # li s1, 0
+.00090000 .00000020 13000000  # li s2, 512
+
+:hex0_loop
+.80000000 $next_byte 6F000000  # jal ra, next_byte
+.00800200 @hex0_done 63000000  # beqz t0, hex0_done
+.00030000 .00001002 13000000  # li t1, 0x21
+.00800200 .00006000 @hex0_loop 63400000  # blt t0, t1, hex0_loop
+.00030000 .00003002 13000000  # li t1, 0x23
+.00800200 .00006000 @skip_comment 63000000  # beq t0, t1, skip_comment
+.00030000 .0000B003 13000000  # li t1, 0x3B
+.00800200 .00006000 @skip_comment 63000000  # beq t0, t1, skip_comment
+.00030000 .00001006 13000000  # li t1, 0x61
+.00800200 .00006000 @no_lower 63400000  # blt t0, t1, no_lower
+.80020000 .00800200 .000000FE 13000000  # addi t0, t0, -0x20
+:no_lower
+.00030000 .00800200 .000000FD 13000000  # addi t1, t0, -0x30
+.00000300 @hex0_loop 63400000  # bltz t1, hex0_loop
+.80030000 .0000A000 13000000  # li t2, 10
+.00000300 .00007000 @got_nibble 63400000  # blt t1, t2, got_nibble
+.00030000 .00000300 .0000F0FE 13000000  # addi t1, t1, -17
+.80030000 .00006000 13000000  # li t2, 6
+.00000300 .00007000 @hex0_loop 63700000  # bgeu t1, t2, hex0_loop
+.00030000 .00000300 .0000A000 13000000  # addi t1, t1, 10
+:got_nibble
+.00000400 @second_nibble 63100000  # bnez s0, second_nibble
+.000B0000 .00000300 .00004000 13100000  # slli s6, t1, 4
+.00040000 .00001000 13000000  # li s0, 1
+$hex0_loop 6F000000  # j hex0_loop
+:second_nibble
+.00030000 .00000B00 .00006000 33600000  # or t1, s6, t1
+.00800A00 .00006000 .00000000 23000000  # sb t1, 0(s5)
+.800A0000 .00800A00 .00001000 13000000  # addi s5, s5, 1
+.00040000 .00000000 13000000  # li s0, 0
+$hex0_loop 6F000000  # j hex0_loop
+
+:skip_comment
+.80000000 $next_byte 6F000000  # jal ra, next_byte
+.00800200 @hex0_done 63000000  # beqz t0, hex0_done
+.00030000 .0000A000 13000000  # li t1, 0x0A
+.00800200 .00006000 @skip_comment 63100000  # bne t0, t1, skip_comment
+$hex0_loop 6F000000  # j hex0_loop
+
+:hex0_done
+.00050000 .00800400 13000000  # mv a0, s1
+.80050000 .00000C00 13000000  # mv a1, s8
+.80020000 .00801040 37000000  # lui t0, 0x40108
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00000000 .00800200 .00000000 67000000  # jalr zero, t0, 0
+
+# --- next_byte: return next byte in t0 ---
+:next_byte
+.80020000 .00000020 13000000  # li t0, 512
+.00000900 .00005000 @nb_ready 63400000  # blt s2, t0, nb_ready
+.800C0000 .00800000 13000000  # mv s9, ra
+.80000000 $read_sector 6F000000  # jal ra, read_sector
+.80000000 .00800C00 13000000  # mv ra, s9
+.80040000 .00800400 .00001000 13000000  # addi s1, s1, 1
+.00090000 .00000000 13000000  # li s2, 0
+:nb_ready
+.80020000 .00800B00 .00002001 33000000  # add t0, s7, s2
+.80020000 .00800200 .00000000 03400000  # lbu t0, 0(t0)
+.00090000 .00000900 .00001000 13000000  # addi s2, s2, 1
+67800000  # ret
+
+# --- read_sector: read sector s1 from SD card into s7 ---
+:read_sector
+.00010000 .00000100 .000080FF 13000000  # addi sp, sp, -8
+.00000100 .00001000 .00000000 23300000  # sd ra, 0(sp)
+
+# CMD17: READ_SINGLE_BLOCK (byte address = sector * 512)
+.00050000 .00001005 13000000  # li a0, 0x51
+.80050000 .00800400 .00009000 13100000  # slli a1, s1, 9
+.00060000 .0000F00F 13000000  # li a2, 0xFF
+.80000000 $sd_cmd 6F000000  # jal ra, sd_cmd
+
+# Wait for data token (0xFE)
+# First 0xFF consumes the bridge RESPONSE→DATA_START transition
+:rs_wait_token
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.80020000 .0000E00F 13000000  # li t0, 0xFE
+.00000500 .00005000 @rs_wait_token 63100000  # bne a0, t0, rs_wait_token
+
+# Read 512 bytes into s7 (t3 as pointer, safe: spi_xfer only clobbers a0/t0)
+.000E0000 .00800B00 13000000  # mv t3, s7
+.80030000 .00000020 13000000  # li t2, 512
+:rs_read_loop
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00000E00 .0000A000 .00000000 23000000  # sb a0, 0(t3)
+.000E0000 .00000E00 .00001000 13000000  # addi t3, t3, 1
+.80030000 .00800300 .0000F0FF 13000000  # addi t2, t2, -1
+.00800300 @rs_read_loop 63100000  # bnez t2, rs_read_loop
+
+# Read 2 CRC bytes (discard)
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+.80000000 .00000100 .00000000 03300000  # ld ra, 0(sp)
+.00010000 .00000100 .00008000 13000000  # addi sp, sp, 8
+67800000  # ret
+
+# --- spi_xfer: exchange one byte over SPI ---
+# a0 = byte to send, returns received byte in a0
+:spi_xfer
+:spi_tx_wait
+.80020000 .00800900 .00008004 03200000  # lw t0, 0x48(s3)
+.00800200 @spi_tx_wait 63400000  # bltz t0, spi_tx_wait
+.00800900 .0000A000 .00040004 23200000  # sw a0, 0x48(s3)
+:spi_rx_wait
+.00050000 .00800900 .0000C004 03200000  # lw a0, 0x4C(s3)
+.00000500 @spi_rx_wait 63400000  # bltz a0, spi_rx_wait
+.00050000 .00000500 .0000F00F 13700000  # andi a0, a0, 0xFF
+67800000  # ret
+
+# --- sd_cmd: send SD command, return R1 in a0 ---
+# a0 = cmd byte, a1 = arg, a2 = crc
+:sd_cmd
+.00010000 .00000100 .000000FF 13000000  # addi sp, sp, -16
+.00000100 .00001000 .00000000 23300000  # sd ra, 0(sp)
+.00000100 .00008000 .00040000 23300000  # sd s0, 8(sp)
+
+# spi_xfer only clobbers a0/t0, so a1 (arg) and a2 (CRC) survive
+
+# Send command byte (a0 already has it)
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+# Send 4 arg bytes (big-endian, a1 preserved across calls)
+.00050000 .00800500 .00008001 13500000  # srli a0, a1, 24
+.00050000 .00000500 .0000F00F 13700000  # andi a0, a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .00800500 .00000001 13500000  # srli a0, a1, 16
+.00050000 .00000500 .0000F00F 13700000  # andi a0, a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .00800500 .00008000 13500000  # srli a0, a1, 8
+.00050000 .00000500 .0000F00F 13700000  # andi a0, a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.00050000 .00800500 .0000F00F 13700000  # andi a0, a1, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+# Send CRC (a2 preserved across calls)
+.00050000 .00000600 13000000  # mv a0, a2
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+
+# Poll for response (bit 7 = 0)
+.00040000 .00008000 13000000  # li s0, 8
+:sd_cmd_poll
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+.80000000 $spi_xfer 6F000000  # jal ra, spi_xfer
+.80020000 .00000500 .00000008 13700000  # andi t0, a0, 0x80
+.00800200 @sd_cmd_done 63000000  # beqz t0, sd_cmd_done
+.00040000 .00000400 .0000F0FF 13000000  # addi s0, s0, -1
+.00000400 @sd_cmd_poll 63100000  # bnez s0, sd_cmd_poll
+.00050000 .0000F00F 13000000  # li a0, 0xFF
+
+:sd_cmd_done
+.80000000 .00000100 .00000000 03300000  # ld ra, 0(sp)
+.00040000 .00000100 .00008000 03300000  # ld s0, 8(sp)
+.00010000 .00000100 .00000001 13000000  # addi sp, sp, 16
+67800000  # ret

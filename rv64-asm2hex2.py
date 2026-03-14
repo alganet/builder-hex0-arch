@@ -216,12 +216,16 @@ def emit(mnemonic, args, comment=''):
             return '\n'.join(lines)
 
     if mnemonic == 'la':
-        # Load address label (use $label with jal-like encoding but we'll use auipc+addi)
-        # For hex2, labels resolve at link time. Use special handling.
+        # Load label address: auipc rd, ~label; addi rd, rd, !label
+        # ~label = U-type upper 20 bits of (label - PC)
+        # !label = I-type lower 12 bits of (label - PC + 4)
         _, r_d = args[0]
         label = args[1][1]
-        # This is tricky in hex2... skip for now
-        raise ValueError(f"la not supported, use lui/addi or load from global")
+        lines = [
+            f'{rd_f(r_d)} ~{label} {OPCODES["auipc"]}  # la {r_d}, {label} (auipc)',
+            f'{rd_f(r_d)} {rs1_f(r_d)} !{label} {OPCODES["addi"]}  # la {r_d}, {label} (addi)',
+        ]
+        return '\n'.join(lines)
 
     if mnemonic == 'j':
         # j label = jal zero, label

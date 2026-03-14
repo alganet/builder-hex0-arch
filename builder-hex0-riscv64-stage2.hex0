@@ -6,13 +6,16 @@
 # A minimal kernel for bootstrapping compilers from source on RISC-V.
 # Inspired by builder-hex0 (https://github.com/ironmeld/builder-hex0).
 #
-# Boot: qemu-system-riscv64 -machine virt -m 2G -nographic \
-#       -kernel builder-hex0-riscv64-stage1.bin \
-#       -drive file=disk.img,format=raw,if=none,id=hd0 \
-#       -device virtio-blk-device,drive=hd0 --no-reboot
+# Boot (virt):     qemu-system-riscv64 -machine virt -m 2G -nographic \
+#                  -kernel builder-hex0-riscv64-stage1-virt.bin \
+#                  -drive file=disk.img,format=raw,if=none,id=hd0 \
+#                  -device virtio-blk-device,drive=hd0 --no-reboot
+# Boot (sifive_u): qemu-system-riscv64 -machine sifive_u -m 2G -nographic \
+#                  -kernel builder-hex0-riscv64-stage1-sifive_u.bin \
+#                  -drive file=disk.img,format=raw,if=sd --no-reboot
 #
 # Compiled by stage 1 from hex0 source on disk to 0x80210000.
-# On entry: a0 = next disk sector (filesystem start)
+# On entry: a0 = next disk sector (filesystem start), a1 = DTB pointer
 #
 # Memory layout (physical addresses):
 #   0x80100000  Sv39 root page table (4KB)
@@ -37,8 +40,8 @@
 #   Kernel disables paging (satp=0) on trap entry, enables before sret
 #
 # Global data at 0x80300000:
-#   +0x000: virtio_mmio_base (8 bytes)
-#   +0x008: virtio_struct_base (8 bytes)
+#   +0x000: storage_mmio_base (8 bytes) [VirtIO MMIO or SPI controller base]
+#   +0x008: virtio_struct_base (8 bytes) [VirtIO only]
 #   +0x010: next_filenum (8 bytes)
 #   +0x018: next_file_address (8 bytes)
 #   +0x020: next_process_num (8 bytes)
@@ -51,6 +54,10 @@
 #   +0x058: cmd_args (3x8: argv[0], argv[1], NULL)
 #   +0x070: cmd_env (1x8: NULL)
 #   +0x078: satp_value (8 bytes)
+#   +0x080: dtb_pointer (8 bytes)
+#   +0x088: disk_read_fn (8 bytes)   [function pointer, set by storage driver]
+#   +0x090: disk_write_fn (8 bytes)  [function pointer, set by storage driver]
+#   +0x098: spi_base (8 bytes)       [SPI+SD only, used by spi_transfer]
 #
 # Process descriptor (4096 bytes each, at 0x80400000):
 #   +0x000: process_address (8)
@@ -93,7 +100,7 @@
 # Trap handler at offset 4 from binary start
 
 #:_start
-6f 10 90 77  # jal zero, main
+6f 20 40 39  # jal zero, main
 
 #============================================================
 # Trap handler (at offset 4 = address 0x80210004)
@@ -121,7 +128,7 @@ b7 02 f8 53  # lui t0, 0x53F80
 23 38 91 00  # sd s1, 16(sp)
 13 04 03 00  # mv s0, t1
 f3 24 00 14  # csrrs s1, sscratch, zero
-6f 00 10 77  # j shutdown
+6f 00 10 77  # j reboot
 #:trap_sp_ok
 # Allocate trap frame (256 bytes = 32 slots of 8 bytes)
 13 01 01 f0  # addi sp, sp, -256
@@ -171,7 +178,7 @@ f3 22 20 14  # csrrs t0, scause, zero
 63 84 62 00  # beq t0, t1, dispatch
 
 # Not ecall from U-mode: halt
-6f 00 50 6d  # j shutdown
+6f 00 50 6d  # j reboot
 
 # Dispatch syscall based on a7
 #:dispatch
@@ -348,7 +355,7 @@ ef 00 d0 3e  # call sbi_putchar
 # s3=fd, s4=buf, s5=count, s6=original count
 # Get file info from process fd table
 13 85 09 00  # mv a0, s3
-ef 10 00 0b  # call fd_to_file_index
+ef 10 00 0e  # call fd_to_file_index
 93 0b 05 00  # mv s7, a0
 
 # Get file_address and file_length from global descriptor
@@ -360,7 +367,7 @@ b7 02 41 50  # lui t0, 0x50410
 03 3d 8c 00  # ld s10, 8(s8)
 
 # Get current_offset from process fd
-ef 00 90 65  # call get_process_base
+ef 00 90 68  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 b3 0d 55 00  # add s11, a0, t0
@@ -487,7 +494,7 @@ b7 02 18 40  # lui t0, 0x40180
 13 05 03 00  # mv a0, t1
 b7 85 00 50  # lui a1, 0x50008
 93 95 15 00  # slli a1, a1, 1
-ef 10 c0 11  # call virtio_read_sector
+ef 10 80 34  # call disk_read_sector
 # Advance sector, reset offset
 b7 02 18 40  # lui t0, 0x40180
 93 92 12 00  # slli t0, t0, 1
@@ -526,7 +533,7 @@ b7 02 18 40  # lui t0, 0x40180
 # s3=fd, s4=buf, s5=count
 # Get file info from process fd table
 13 85 09 00  # mv a0, s3
-ef 00 50 72  # call fd_to_file_index
+ef 00 50 75  # call fd_to_file_index
 93 0b 05 00  # mv s7, a0
 
 # Get file_address and file_length from global descriptor
@@ -538,7 +545,7 @@ b3 82 62 00  # add t0, t0, t1
 83 bc 82 00  # ld s9, 8(t0)
 
 # Get current_offset from process fd
-ef 00 d0 4c  # call get_process_base
+ef 00 d0 4f  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 0d 55 00  # add s10, a0, t0
@@ -588,7 +595,7 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 d0 48  # call absolute_path
+ef 00 d0 4b  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Check O_CREAT (bit 6 = 0x40)
@@ -597,7 +604,7 @@ ef 00 d0 48  # call absolute_path
 
 # Open existing file
 13 85 09 00  # mv a0, s3
-ef 00 50 61  # call find_file
+ef 00 50 64  # call find_file
 63 4a 05 0e  # bltz a0, openat_fail
 93 0a 05 00  # mv s5, a0
 
@@ -627,7 +634,7 @@ ef 00 50 61  # call find_file
 03 cb 0b 00  # lbu s6, 0(s7)
 23 80 0b 00  # sb zero, 0(s7)
 13 85 09 00  # mv a0, s3
-ef 00 d0 5c  # call find_file
+ef 00 d0 5f  # call find_file
 23 80 6b 01  # sb s6, 0(s7)
 63 44 05 0a  # bltz a0, openat_fail
 
@@ -674,7 +681,7 @@ b3 82 62 00  # add t0, t0, t1
 
 #:openat_alloc_fd
 # Allocate a process fd slot (start from fd 4)
-ef 00 90 39  # call get_process_base
+ef 00 90 3c  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 02 40 00  # li t0, 4
 13 03 00 1c  # li t1, 448
@@ -707,7 +714,7 @@ b3 03 75 00  # add t2, a0, t2
 #:syscall_close
 83 39 81 04  # ld s3, 72(sp)
 
-ef 00 d0 34  # call get_process_base
+ef 00 d0 37  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 05 55 00  # add a0, a0, t0
@@ -726,7 +733,7 @@ ef 00 d0 34  # call get_process_base
 03 3a 01 05  # ld s4, 80(sp)
 83 3a 81 05  # ld s5, 88(sp)
 
-ef 00 50 32  # call get_process_base
+ef 00 50 35  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 0b 55 00  # add s6, a0, t0
@@ -775,12 +782,12 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 10 2d  # call absolute_path
+ef 00 10 30  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Find the file
 13 85 09 00  # mv a0, s3
-ef 00 10 46  # call find_file
+ef 00 10 49  # call find_file
 63 44 05 06  # bltz a0, chdir_fail
 
 # Check it's a directory (file_length == 0)
@@ -792,7 +799,7 @@ b3 82 62 00  # add t0, t0, t1
 63 18 03 04  # bnez t1, chdir_fail
 
 # Copy path to process current_dir
-ef 00 10 28  # call get_process_base
+ef 00 10 2b  # call get_process_base
 13 0a 05 10  # addi s4, a0, 0x100
 
 93 82 09 00  # mv t0, s3
@@ -836,7 +843,7 @@ b7 02 00 40  # lui t0, 0x40000
 93 92 12 00  # slli t0, t0, 1
 b3 89 59 00  # add s3, s3, t0
 
-ef 00 50 21  # call get_process_base
+ef 00 50 24  # call get_process_base
 13 05 05 10  # addi a0, a0, 0x100
 93 02 05 00  # mv t0, a0
 13 83 09 00  # mv t1, s3
@@ -894,8 +901,8 @@ b7 02 00 40  # lui t0, 0x40000
 b3 89 59 00  # add s3, s3, t0
 
 13 85 09 00  # mv a0, s3
-ef 00 90 1a  # call absolute_path
-ef 00 10 34  # call find_file
+ef 00 90 1d  # call absolute_path
+ef 00 10 37  # call find_file
 
 63 46 05 00  # bltz a0, faccessat_fail
 23 34 01 04  # sd zero, 72(sp)
@@ -921,7 +928,7 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 50 17  # call absolute_path
+ef 00 50 1a  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Check parent directory exists (find last '/')
@@ -944,7 +951,7 @@ ef 00 50 17  # call absolute_path
 03 cb 0b 00  # lbu s6, 0(s7)
 23 80 0b 00  # sb zero, 0(s7)
 13 85 09 00  # mv a0, s3
-ef 00 10 2d  # call find_file
+ef 00 10 30  # call find_file
 23 80 6b 01  # sb s6, 0(s7)
 63 4a 05 06  # bltz a0, mkdirat_fail
 
@@ -1007,7 +1014,7 @@ b3 82 62 00  # add t0, t0, t1
 #============================================================
 #:syscall_clone
 # Get current process descriptor
-ef 00 10 08  # call get_process_base
+ef 00 10 0b  # call get_process_base
 93 09 05 00  # mv s3, a0
 
 # Save brk to saved_brk (+0x28)
@@ -1045,7 +1052,7 @@ b7 02 00 54  # lui t0, 0x54000
 13 05 0a 00  # mv a0, s4
 93 05 01 00  # mv a1, sp
 13 06 03 00  # mv a2, t1
-ef 00 c0 6d  # call memcpy
+ef 00 40 6d  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1081,7 +1088,7 @@ b7 02 18 40  # lui t0, 0x40180
 # Copy process memory
 13 85 0b 00  # mv a0, s7
 93 85 0a 00  # mv a1, s5
-ef 00 40 68  # call memcpy
+ef 00 c0 67  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1113,7 +1120,7 @@ b7 02 18 40  # lui t0, 0x40180
 13 85 0b 00  # mv a0, s7
 93 85 0a 00  # mv a1, s5
 13 06 0b 00  # mv a2, s6
-ef 00 c0 62  # call memcpy
+ef 00 40 62  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1144,7 +1151,7 @@ b3 89 59 00  # add s3, s3, t0
 b3 8a 5a 00  # add s5, s5, t0
 
 # Check if current process forked (check BEFORE first-process check)
-ef 00 00 73  # call get_process_base
+ef 00 00 76  # call get_process_base
 13 0b 05 00  # mv s6, a0
 83 32 0b 02  # ld t0, 0x20(s6)
 63 98 02 02  # bnez t0, execve_forked
@@ -1225,7 +1232,7 @@ b3 05 73 00  # add a1, t1, t2
 # Copy string from a1 to s9 (256 bytes max)
 13 85 0c 00  # mv a0, s9
 13 06 00 10  # li a2, 256
-ef 00 40 53  # call memcpy
+ef 00 c0 52  # call memcpy
 
 # Calculate VA for this string: VA = PA - 0x80000000
 37 03 00 40  # lui t1, 0x40000
@@ -1268,7 +1275,7 @@ b3 05 73 00  # add a1, t1, t2
 93 8c 0c f0  # addi s9, s9, -256
 13 85 0c 00  # mv a0, s9
 13 06 00 10  # li a2, 256
-ef 00 80 4c  # call memcpy
+ef 00 00 4c  # call memcpy
 
 37 03 00 40  # lui t1, 0x40000
 13 13 13 00  # slli t1, t1, 1
@@ -1351,10 +1358,10 @@ b7 02 00 40  # lui t0, 0x40000
 # --- Load ELF ---
 # Resolve program name
 13 85 09 00  # mv a0, s3
-ef 00 80 56  # call absolute_path
+ef 00 80 59  # call absolute_path
 93 09 05 00  # mv s3, a0
 13 85 09 00  # mv a0, s3
-ef 00 80 6f  # call find_file
+ef 00 80 72  # call find_file
 63 44 05 16  # bltz a0, execve_fail
 93 0c 05 00  # mv s9, a0
 
@@ -1374,7 +1381,7 @@ b7 02 18 40  # lui t0, 0x40180
 23 b0 62 02  # sd t1, 0x20(t0)
 
 # Get new process descriptor
-ef 00 00 50  # call get_process_base
+ef 00 00 53  # call get_process_base
 13 0b 05 00  # mv s6, a0
 
 # Copy cwd from previous process
@@ -1398,7 +1405,7 @@ b3 02 5b 40  # sub t0, s6, t0
 13 05 0b 20  # addi a0, s6, 0x200
 b7 15 00 00  # li a1, 3584 (upper)
 93 85 05 e0  # li a1, 3584 (lower)
-ef 00 00 36  # call memset_zero
+ef 00 80 35  # call memset_zero
 
 # Parse 64-bit ELF header
 # e_entry at offset 0x18 (8 bytes)
@@ -1416,7 +1423,7 @@ ef 00 00 36  # call memset_zero
 37 05 30 40  # lui a0, 0x40300
 13 15 15 00  # slli a0, a0, 1
 b7 05 20 00  # lui a1, 0x200
-ef 00 00 34  # call memset_zero
+ef 00 80 33  # call memset_zero
 
 # Reset brk to process base (will be set properly by phdr loop)
 b7 02 30 40  # lui t0, 0x40300
@@ -1449,7 +1456,7 @@ b3 05 5d 00  # add a1, s10, t0
 33 85 62 00  # add a0, t0, t1
 
 03 36 0a 02  # ld a2, 0x20(s4)
-ef 00 40 31  # call memcpy
+ef 00 c0 30  # call memcpy
 
 # Track end of loaded segments for brk
 83 32 0a 01  # ld t0, 0x10(s4)
@@ -1551,7 +1558,7 @@ b7 02 18 40  # lui t0, 0x40180
 03 35 0a 00  # ld a0, 0(s4)
 83 35 8a 03  # ld a1, 0x38(s4)
 03 36 0a 04  # ld a2, 0x40(s4)
-ef 00 80 23  # call memcpy
+ef 00 00 23  # call memcpy
 
 # Deallocate save area: reset next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1570,7 +1577,7 @@ b7 02 18 40  # lui t0, 0x40180
 83 35 8a 04  # ld a1, 0x48(s4)
 13 05 01 00  # mv a0, sp
 03 36 0a 05  # ld a2, 0x50(s4)
-ef 00 c0 20  # call memcpy
+ef 00 40 20  # call memcpy
 
 # Restore parent user stack
 03 35 81 00  # ld a0, 8(sp)
@@ -1579,7 +1586,7 @@ b7 02 00 40  # lui t0, 0x40000
 33 05 55 00  # add a0, a0, t0
 83 35 8a 05  # ld a1, 0x58(s4)
 03 36 0a 06  # ld a2, 0x60(s4)
-ef 00 00 1f  # call memcpy
+ef 00 80 1e  # call memcpy
 
 # Flush I-cache after restoring parent code/data
 0f 10 00 00  # fence.i
@@ -1598,7 +1605,7 @@ b3 82 62 00  # add t0, t0, t1
 03 b1 02 01  # ld sp, 0x10(t0)
 
 # Jump to shell_return (disables paging, goes to shell_loop)
-6f 10 c0 07  # j shell_return
+6f 10 80 49  # j shell_return
 
 #============================================================
 # syscall_waitid: waitid(idtype, id, infop, options, ...)
@@ -1607,7 +1614,7 @@ b3 82 62 00  # add t0, t0, t1
 #============================================================
 #:syscall_waitid
 # Get current process descriptor
-ef 00 80 30  # call get_process_base
+ef 00 80 33  # call get_process_base
 83 32 05 03  # ld t0, 0x30(a0)
 
 # The infop struct: write status. For Linux compatibility,
@@ -1639,7 +1646,7 @@ b7 03 00 40  # lui t2, 0x40000
 #============================================================
 #:syscall_wait4
 # Get current process descriptor
-ef 00 80 2d  # call get_process_base
+ef 00 80 30  # call get_process_base
 83 32 05 03  # ld t0, 0x30(a0)
 
 # Get wstatus pointer (a1)
@@ -1777,22 +1784,21 @@ b7 02 18 40  # lui t0, 0x40180
 67 80 00 00  # ret
 
 #============================================================
-# shutdown: SBI SRST system reset (via OpenSBI in M-mode)
-# OpenSBI handles the actual QEMU test device write from M-mode
-# where PMP allows it. Direct S-mode write to 0x100000 faults.
+# reboot: SBI SRST cold reboot (via OpenSBI)
+# Uses COLD_REBOOT (type 1) instead of SHUTDOWN (type 0) because:
+# - All boards have a reboot device (not all have a shutdown device)
+# - Reboot is the correct semantic for bootstrapping (boot -> build -> reboot)
+# - Tests use --no-reboot so QEMU exits cleanly on reboot
 #============================================================
-#:shutdown
+#:reboot
 b7 58 52 53  # lui a7, 0x53525
 93 88 48 35  # addi a7, a7, 0x354
 13 08 00 00  # li a6, 0
-13 05 00 00  # li a0, 0
+13 05 10 00  # li a0, 1
 93 05 00 00  # li a1, 0
 73 00 00 00  # ecall
-# Legacy SBI shutdown as fallback
-93 08 80 00  # li a7, 8
-73 00 00 00  # ecall
-#:shutdown_hang
-6f 00 00 00  # j shutdown_hang
+#:reboot_hang
+6f 00 00 00  # j reboot_hang
 
 #============================================================
 # memset_zero: Zero memory from a0 to a0+a1
@@ -1827,6 +1833,30 @@ b7 58 52 53  # lui a7, 0x53525
 67 80 00 00  # ret
 
 #============================================================
+# bswap32: Byte-swap a 32-bit value (big-endian <-> little-endian)
+# a0 = input value (only low 32 bits used)
+# Returns: a0 = byte-swapped value (zero-extended to 64 bits)
+#============================================================
+#:bswap32
+# Extract bytes and reassemble in reversed order
+# Input:  a0 = [B3 B2 B1 B0] (low 32 bits)
+# Output: a0 = [B0 B1 B2 B3]
+93 72 f5 0f  # andi t0, a0, 0xFF
+93 92 82 01  # slli t0, t0, 24
+13 53 85 00  # srli t1, a0, 8
+13 73 f3 0f  # andi t1, t1, 0xFF
+13 13 03 01  # slli t1, t1, 16
+b3 e2 62 00  # or t0, t0, t1
+13 53 05 01  # srli t1, a0, 16
+13 73 f3 0f  # andi t1, t1, 0xFF
+13 13 83 00  # slli t1, t1, 8
+b3 e2 62 00  # or t0, t0, t1
+13 53 85 01  # srli t1, a0, 24
+13 73 f3 0f  # andi t1, t1, 0xFF
+33 e5 62 00  # or a0, t0, t1
+67 80 00 00  # ret
+
+#============================================================
 # read_stdin_byte: Read one byte from stdin (disk via VirtIO)
 # Uses globals: stdin_sector (+0x30), stdin_offset (+0x38)
 # Returns: a0 = byte read
@@ -1850,7 +1880,7 @@ b7 02 18 40  # lui t0, 0x40180
 03 b5 02 03  # ld a0, 0x30(t0)
 b7 85 00 50  # lui a1, 0x50008
 93 95 15 00  # slli a1, a1, 1
-ef 00 00 4c  # call virtio_read_sector
+ef 00 c0 6b  # call disk_read_sector
 
 # Advance sector, reset offset
 b7 02 18 40  # lui t0, 0x40180
@@ -1895,7 +1925,7 @@ b7 02 18 40  # lui t0, 0x40180
 b7 02 08 40  # lui t0, 0x40080
 13 95 12 00  # slli a0, t0, 1
 b7 15 00 00  # lui a1, 1
-ef f0 df f2  # call memset_zero
+ef f0 5f ef  # call memset_zero
 
 # Page table entry format (Sv39 gigapage):
 # PPN[53:10] = PA >> 30 << 28 (for gigapages, PPN[1:0] must be 0)
@@ -2213,9 +2243,231 @@ ef f0 9f db  # call get_process_base
 67 80 00 00  # ret
 
 #============================================================
-# virtio_init: Find and initialize VirtIO block device
-# Scans MMIO addresses 0x10001000-0x10008000
-# Stores MMIO base and struct base in global data
+# fdt_find_storage: Parse FDT to find storage device
+# a0 = DTB pointer (from OpenSBI via stage 1)
+# Returns: a0 = MMIO base address (0 if not found)
+#          a1 = storage type (0=none, 1=virtio, 2=spi_sd)
+#
+# Single-pass DTB walk. Detects:
+# - VirtIO: node name starts with "virt", reg property gives MMIO base,
+#   probed for VirtIO magic (0x74726976) and block device ID (2)
+# - SPI+SD: node name starts with "spi@" (saves reg as SPI base),
+#   child node name starts with "mmc@" (confirms SD card present)
+#
+# No fallback — returns what the DTB describes.
+# FDT is big-endian; uses bswap32 for all multi-byte fields.
+#============================================================
+#:fdt_find_storage
+13 01 01 fa  # addi sp, sp, -96
+23 30 11 00  # sd ra, 0(sp)
+23 34 81 00  # sd s0, 8(sp)
+23 38 91 00  # sd s1, 16(sp)
+23 3c 31 01  # sd s3, 24(sp)
+23 30 41 03  # sd s4, 32(sp)
+23 34 51 03  # sd s5, 40(sp)
+23 38 61 03  # sd s6, 48(sp)
+23 3c 81 03  # sd s8, 56(sp)
+23 30 91 05  # sd s9, 64(sp)
+23 34 a1 05  # sd s10, 72(sp)
+23 38 b1 05  # sd s11, 80(sp)
+
+63 0e 05 18  # beqz a0, fdt_not_found
+13 04 05 00  # mv s0, a0
+
+# Validate FDT magic: 0xd00dfeed big-endian = 0xedfe0dd0 as LE lw
+83 22 04 00  # lw t0, 0(s0)
+37 13 fe ed  # lui t1, 0xedfe1
+13 03 03 dd  # addi t1, t1, -560
+63 94 62 18  # bne t0, t1, fdt_not_found
+
+# Get structure block offset (big-endian u32 at dtb+8)
+03 25 84 00  # lw a0, 8(s0)
+ef f0 5f bf  # call bswap32
+b3 04 a4 00  # add s1, s0, a0
+
+# Get strings block offset (big-endian u32 at dtb+0xC)
+03 25 c4 00  # lw a0, 0xC(s0)
+ef f0 9f be  # call bswap32
+b3 09 a4 00  # add s3, s0, a0
+
+13 0a 00 00  # li s4, 0
+93 0a 00 00  # li s5, 0
+13 0d 00 00  # li s10, 0
+93 0d 00 00  # li s11, 0
+
+#:fdt_walk
+03 a5 04 00  # lw a0, 0(s1)
+ef f0 df bc  # call bswap32
+93 0c 05 00  # mv s9, a0
+93 84 44 00  # addi s1, s1, 4
+
+# FDT_END (9)
+93 02 90 00  # li t0, 9
+63 8a 5c 12  # beq s9, t0, fdt_walk_done
+
+# FDT_BEGIN_NODE (1)
+93 02 10 00  # li t0, 1
+63 8c 5c 00  # beq s9, t0, fdt_begin_node
+
+# FDT_END_NODE (2)
+93 02 20 00  # li t0, 2
+63 88 5c 06  # beq s9, t0, fdt_end_node
+
+# FDT_PROP (3)
+93 02 30 00  # li t0, 3
+63 8a 5c 0a  # beq s9, t0, fdt_prop
+
+# NOP (4) or unknown: skip
+6f f0 1f fd  # j fdt_walk
+
+#:fdt_begin_node
+# Reset per-node state
+13 0a 00 00  # li s4, 0
+93 0a 00 00  # li s5, 0
+
+# Check node name prefix (first 4 bytes as LE lw)
+83 a2 04 00  # lw t0, 0(s1)
+
+# "virt" = 0x74726976
+37 73 72 74  # lui t1, 0x74727
+13 03 63 97  # addi t1, t1, -1674
+63 96 62 00  # bne t0, t1, fdt_check_spi
+13 0a 10 00  # li s4, 1
+6f 00 c0 02  # j fdt_skip_name
+
+#:fdt_check_spi
+# "spi@" = bytes 73 70 69 40 = LE 0x40697073
+37 73 69 40  # lui t1, 0x40697
+13 03 33 07  # addi t1, t1, 0x073
+63 96 62 00  # bne t0, t1, fdt_check_mmc
+13 0a 20 00  # li s4, 2
+6f 00 80 01  # j fdt_skip_name
+
+#:fdt_check_mmc
+# "mmc@" = bytes 6d 6d 63 40 = LE 0x40636d6d
+37 73 63 40  # lui t1, 0x40637
+13 03 d3 d6  # addi t1, t1, -659
+63 96 62 00  # bne t0, t1, fdt_skip_name
+63 04 0d 00  # beqz s10, fdt_skip_name
+93 0d 10 00  # li s11, 1
+
+#:fdt_skip_name
+# Skip null-terminated node name, then align to 4 bytes
+83 c2 04 00  # lbu t0, 0(s1)
+93 84 14 00  # addi s1, s1, 1
+e3 9c 02 fe  # bnez t0, fdt_skip_name
+93 84 34 00  # addi s1, s1, 3
+93 f4 c4 ff  # andi s1, s1, -4
+6f f0 1f f7  # j fdt_walk
+
+#:fdt_end_node
+# Check if we found a VirtIO block device
+93 02 10 00  # li t0, 1
+63 18 5a 02  # bne s4, t0, fdt_end_check_spi
+e3 82 0a f6  # beqz s5, fdt_walk
+
+# Probe: check VirtIO magic at candidate address
+83 a2 0a 00  # lw t0, 0(s5)
+37 73 72 74  # lui t1, 0x74727
+13 03 63 97  # addi t1, t1, -1674
+e3 9a 62 f4  # bne t0, t1, fdt_walk
+83 a2 8a 00  # lw t0, 8(s5)
+13 03 20 00  # li t1, 2
+e3 94 62 f4  # bne t0, t1, fdt_walk
+
+# Found VirtIO block device
+13 85 0a 00  # mv a0, s5
+93 05 10 00  # li a1, 1
+6f 00 00 0a  # j fdt_found
+
+#:fdt_end_check_spi
+# When an spi@ node ends, save its reg as candidate SPI base
+93 02 20 00  # li t0, 2
+e3 1a 5a f2  # bne s4, t0, fdt_walk
+63 94 0a 00  # bnez s5, fdt_save_spi_base
+6f f0 df f2  # j fdt_walk
+#:fdt_save_spi_base
+13 8d 0a 00  # mv s10, s5
+6f f0 5f f2  # j fdt_walk
+
+#:fdt_prop
+# Read property length (big-endian u32)
+03 a5 04 00  # lw a0, 0(s1)
+ef f0 df ae  # call bswap32
+13 0b 05 00  # mv s6, a0
+
+# Read property nameoff (big-endian u32)
+03 a5 44 00  # lw a0, 4(s1)
+ef f0 1f ae  # call bswap32
+13 0c 05 00  # mv s8, a0
+
+93 84 84 00  # addi s1, s1, 8
+# s1 now points to property data
+
+# Only extract reg from virtio or spi nodes
+63 0e 0a 02  # beqz s4, fdt_prop_skip
+
+# Check if property name is "reg\0" (LE lw = 0x00676572)
+b3 82 89 01  # add t0, s3, s8
+83 a2 02 00  # lw t0, 0(t0)
+37 63 67 00  # li t1, 6776178 (upper)
+13 03 23 57  # li t1, 6776178 (lower)
+63 94 62 02  # bne t0, t1, fdt_prop_skip
+
+# Extract MMIO base address from reg property
+# Assumes #address-cells=2: 8-byte address (2x big-endian u32)
+03 a5 04 00  # lw a0, 0(s1)
+ef f0 9f ab  # call bswap32
+93 1a 05 02  # slli s5, a0, 32
+03 a5 44 00  # lw a0, 4(s1)
+ef f0 df aa  # call bswap32
+b3 ea aa 00  # or s5, s5, a0
+
+# If this is a spi@ node, save the base immediately (before child nodes reset s5)
+93 02 20 00  # li t0, 2
+63 14 5a 00  # bne s4, t0, fdt_prop_skip
+13 8d 0a 00  # mv s10, s5
+
+#:fdt_prop_skip
+# Advance past property data, aligned to 4 bytes
+b3 84 64 01  # add s1, s1, s6
+93 84 34 00  # addi s1, s1, 3
+93 f4 c4 ff  # andi s1, s1, -4
+6f f0 df eb  # j fdt_walk
+
+#:fdt_walk_done
+# DTB walk complete. Check if we found SPI+SD (mmc under spi)
+63 8a 0d 00  # beqz s11, fdt_not_found
+63 08 0d 00  # beqz s10, fdt_not_found
+13 05 0d 00  # mv a0, s10
+93 05 20 00  # li a1, 2
+6f 00 c0 00  # j fdt_found
+
+#:fdt_not_found
+13 05 00 00  # li a0, 0
+93 05 00 00  # li a1, 0
+
+#:fdt_found
+# a0 = MMIO base (or 0), a1 = storage type
+83 30 01 00  # ld ra, 0(sp)
+03 34 81 00  # ld s0, 8(sp)
+83 34 01 01  # ld s1, 16(sp)
+83 39 81 01  # ld s3, 24(sp)
+03 3a 01 02  # ld s4, 32(sp)
+83 3a 81 02  # ld s5, 40(sp)
+03 3b 01 03  # ld s6, 48(sp)
+03 3c 81 03  # ld s8, 56(sp)
+83 3c 01 04  # ld s9, 64(sp)
+03 3d 81 04  # ld s10, 72(sp)
+83 3d 01 05  # ld s11, 80(sp)
+13 01 01 06  # addi sp, sp, 96
+67 80 00 00  # ret
+
+#============================================================
+# virtio_init: Initialize VirtIO block device at given MMIO base
+# a0 = MMIO base address (from fdt_find_storage)
+# Halts if a0 == 0. Stores MMIO base, struct base, and disk
+# function pointers in global data.
 #============================================================
 #:virtio_init
 13 01 01 fd  # addi sp, sp, -48
@@ -2225,6 +2477,10 @@ ef f0 9f db  # call get_process_base
 23 3c 41 01  # sd s4, 24(sp)
 23 30 51 03  # sd s5, 32(sp)
 
+# a0 = MMIO base from fdt_find_storage; halt if 0
+63 0c 05 0e  # beqz a0, virtio_init_fail
+93 09 05 00  # mv s3, a0
+
 # Load VirtIO structures base: s4 = 0x80500000
 b7 02 28 40  # lui t0, 0x40280
 13 9a 12 00  # slli s4, t0, 1
@@ -2232,38 +2488,6 @@ b7 02 28 40  # lui t0, 0x40280
 # Load global data base: s5 = 0x80300000
 b7 02 18 40  # lui t0, 0x40180
 93 9a 12 00  # slli s5, t0, 1
-
-# Scan MMIO addresses
-b7 19 00 10  # lui s3, 0x10001
-
-#:virtio_scan_loop
-# Read MagicValue at offset 0
-83 a2 09 00  # lw t0, 0(s3)
-# Compare against 0x74726976
-37 73 72 74  # lui t1, 0x74727
-13 03 63 97  # addi t1, t1, -1674
-63 98 62 00  # bne t0, t1, virtio_scan_next
-
-# Magic matches. Check DeviceID at offset 8
-83 a2 89 00  # lw t0, 8(s3)
-13 03 20 00  # li t1, 2
-63 80 62 02  # beq t0, t1, virtio_found
-
-#:virtio_scan_next
-# Advance to next MMIO slot (+0x1000)
-b7 12 00 00  # lui t0, 1
-b3 89 59 00  # add s3, s3, t0
-
-# Check if past 0x10008000
-37 93 00 10  # lui t1, 0x10009
-e3 9c 69 fc  # bne s3, t1, virtio_scan_loop
-
-# Not found - print '!' and halt
-13 05 10 02  # li a0, 0x21
-ef f0 1f a9  # call sbi_putchar
-6f f0 5f bb  # j shutdown
-
-#:virtio_found
 # Reset device
 23 a8 09 06  # sw zero, 0x70(s3)
 
@@ -2288,7 +2512,7 @@ ef f0 1f a9  # call sbi_putchar
 # Zero structures area (8KB)
 13 05 0a 00  # mv a0, s4
 b7 25 00 00  # lui a1, 2
-ef f0 9f ba  # call memset_zero
+ef f0 df 99  # call memset_zero
 
 # Set GuestPageSize = 4096 (V1 requirement, offset 0x28)
 b7 12 00 00  # lui t0, 1
@@ -2314,7 +2538,7 @@ b7 02 08 00  # lui t0, 0x80
 93 02 70 00  # li t0, 7
 23 a8 59 06  # sw t0, 0x70(s3)
 
-6f 00 c0 07  # j virtio_init_done
+6f 00 c0 08  # j virtio_init_done
 
 #--- Version 2 (modern) setup ---
 #:virtio_modern_setup
@@ -2329,12 +2553,12 @@ b7 02 08 00  # lui t0, 0x80
 # Verify FEATURES_OK persisted
 83 a2 09 07  # lw t0, 0x70(s3)
 93 f2 82 00  # andi t0, t0, 8
-e3 8a 02 b2  # beqz t0, shutdown
+e3 88 02 92  # beqz t0, reboot
 
 # Zero structures area
 13 05 0a 00  # mv a0, s4
 b7 25 00 00  # lui a1, 2
-ef f0 df b4  # call memset_zero
+ef f0 1f 94  # call memset_zero
 
 # Select queue 0
 23 a8 09 02  # sw zero, 0x30(s3)
@@ -2371,11 +2595,27 @@ b3 02 5a 00  # add t0, s4, t0
 93 02 f0 00  # li t0, 0xF
 23 a8 59 06  # sw t0, 0x70(s3)
 
+6f 00 00 01  # j virtio_init_done
+
+#:virtio_init_fail
+# Print '!' and halt — DTB did not provide a valid VirtIO address
+13 05 10 02  # li a0, 0x21
+ef f0 0f fa  # call sbi_putchar
+6f f0 5f 8c  # j reboot
+
 #:virtio_init_done
 # Store MMIO base in global data
 23 b0 3a 01  # sd s3, 0(s5)
 # Store struct base
 23 b4 4a 01  # sd s4, 8(s5)
+
+# Set disk I/O function pointers
+97 02 00 00  # la t0, virtio_read_sector (auipc)
+93 82 42 05  # la t0, virtio_read_sector (addi)
+23 b4 5a 08  # sd t0, 0x88(s5)
+97 02 00 00  # la t0, virtio_write_sector (auipc)
+93 82 42 18  # la t0, virtio_write_sector (addi)
+23 b8 5a 08  # sd t0, 0x90(s5)
 
 # Restore and return
 83 30 01 00  # ld ra, 0(sp)
@@ -2385,6 +2625,30 @@ b3 02 5a 00  # add t0, s4, t0
 83 3a 01 02  # ld s5, 32(sp)
 13 01 01 03  # addi sp, sp, 48
 67 80 00 00  # ret
+
+#============================================================
+# disk_read_sector: Read one 512-byte sector via function pointer
+# a0 = sector number, a1 = destination buffer address
+# Returns: a0 = 0 on success
+# Dispatches through disk_read_fn at globals+0x088
+#============================================================
+#:disk_read_sector
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+83 b2 82 08  # ld t0, 0x88(t0)
+67 80 02 00  # jr t0
+
+#============================================================
+# disk_write_sector: Write one 512-byte sector via function pointer
+# a0 = sector number, a1 = source buffer address
+# Returns: a0 = 0 on success
+# Dispatches through disk_write_fn at globals+0x090
+#============================================================
+#:disk_write_sector
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+83 b2 02 09  # ld t0, 0x90(t0)
+67 80 02 00  # jr t0
 
 #============================================================
 # virtio_read_sector: Read one 512-byte sector from disk
@@ -2618,6 +2882,233 @@ b3 02 5a 00  # add t0, s4, t0
 67 80 00 00  # ret
 
 #============================================================
+# SPI+SD Driver (SiFive SPI controller + SD card over SPI)
+#
+# SiFive SPI registers (offsets from base):
+#   SCKDIV  0x00  Clock divisor
+#   SCKMODE 0x04  SPI mode (polarity/phase)
+#   CSID    0x10  Chip select ID
+#   CSDEF   0x14  CS default (active-low)
+#   CSMODE  0x18  CS mode (0=auto, 2=hold, 3=off)
+#   TXDATA  0x48  TX FIFO (bit 31 = full)
+#   RXDATA  0x4C  RX FIFO (bit 31 = empty)
+#   FCTRL   0x60  Flash interface control (must be 0 for raw SPI)
+#============================================================
+
+#============================================================
+# spi_transfer: Exchange one byte over SPI
+# a0 = byte to send
+# Returns: a0 = byte received
+# Expects SPI base in globals+0x098
+#============================================================
+#:spi_transfer
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+83 b2 82 09  # ld t0, 0x98(t0)
+
+# Wait for TX not full (bit 31 = 0)
+#:spi_tx_wait
+03 a3 82 04  # lw t1, 0x48(t0)
+e3 4e 03 fe  # bltz t1, spi_tx_wait
+# Write byte
+23 a4 a2 04  # sw a0, 0x48(t0)
+
+# Wait for RX not empty (bit 31 = 0)
+#:spi_rx_wait
+03 a5 c2 04  # lw a0, 0x4C(t0)
+e3 4e 05 fe  # bltz a0, spi_rx_wait
+13 75 f5 0f  # andi a0, a0, 0xFF
+67 80 00 00  # ret
+
+#============================================================
+# spi_sd_cmd: Send an SD command and get R1 response
+# a0 = command byte (0x40 | cmd_index)
+# a1 = 32-bit argument
+# a2 = CRC byte
+# Returns: a0 = R1 response byte
+#============================================================
+#:spi_sd_cmd
+13 01 01 ff  # addi sp, sp, -16
+23 30 11 00  # sd ra, 0(sp)
+23 34 81 00  # sd s0, 8(sp)
+
+# spi_transfer only clobbers a0/t0/t1, so a1 (arg) and a2 (CRC) survive
+
+# Send command byte (a0 already has it)
+ef f0 df fc  # call spi_transfer
+
+# Send 4 argument bytes (big-endian, a1 preserved across calls)
+13 d5 85 01  # srli a0, a1, 24
+13 75 f5 0f  # andi a0, a0, 0xFF
+ef f0 1f fc  # call spi_transfer
+13 d5 05 01  # srli a0, a1, 16
+13 75 f5 0f  # andi a0, a0, 0xFF
+ef f0 5f fb  # call spi_transfer
+13 d5 85 00  # srli a0, a1, 8
+13 75 f5 0f  # andi a0, a0, 0xFF
+ef f0 9f fa  # call spi_transfer
+13 f5 f5 0f  # andi a0, a1, 0xFF
+ef f0 1f fa  # call spi_transfer
+
+# Send CRC byte (a2 preserved across calls)
+13 05 06 00  # mv a0, a2
+ef f0 9f f9  # call spi_transfer
+
+# Poll for response (up to 8 bytes, wait for bit 7 = 0)
+13 04 80 00  # li s0, 8
+#:spi_sd_cmd_poll
+13 05 f0 0f  # li a0, 0xFF
+ef f0 df f8  # call spi_transfer
+93 72 05 08  # andi t0, a0, 0x80
+63 88 02 00  # beqz t0, spi_sd_cmd_done
+13 04 f4 ff  # addi s0, s0, -1
+e3 16 04 fe  # bnez s0, spi_sd_cmd_poll
+13 05 f0 0f  # li a0, 0xFF
+
+#:spi_sd_cmd_done
+83 30 01 00  # ld ra, 0(sp)
+03 34 81 00  # ld s0, 8(sp)
+13 01 01 01  # addi sp, sp, 16
+67 80 00 00  # ret
+
+#============================================================
+# spi_sd_init: Configure SPI+SD for stage 2 use
+# a0 = SPI controller MMIO base (from fdt_find_storage)
+# Stage 1 already initialized the SD card. This just stores
+# the SPI base in globals and sets disk function pointers.
+#============================================================
+#:spi_sd_init
+# Leaf function — no calls, no stack needed
+
+# Store SPI base in globals
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+23 bc a2 08  # sd a0, 0x98(t0)
+23 b0 a2 00  # sd a0, 0(t0)
+
+# Set disk function pointers
+17 03 00 00  # la t1, spi_sd_read_sector (auipc)
+13 03 c3 01  # la t1, spi_sd_read_sector (addi)
+23 b4 62 08  # sd t1, 0x88(t0)
+17 03 00 00  # la t1, spi_sd_write_sector (auipc)
+13 03 c3 08  # la t1, spi_sd_write_sector (addi)
+23 b8 62 08  # sd t1, 0x90(t0)
+
+67 80 00 00  # ret
+
+#============================================================
+# spi_sd_read_sector: Read one 512-byte sector from SD card
+# a0 = sector number, a1 = destination buffer address
+# Returns: a0 = 0 on success
+#============================================================
+#:spi_sd_read_sector
+13 01 81 fe  # addi sp, sp, -24
+23 30 11 00  # sd ra, 0(sp)
+23 34 81 00  # sd s0, 8(sp)
+23 38 31 01  # sd s3, 16(sp)
+
+13 84 05 00  # mv s0, a1
+93 09 05 00  # mv s3, a0
+
+# CMD17: READ_SINGLE_BLOCK (byte address = sector * 512)
+13 05 10 05  # li a0, 0x51
+93 95 99 00  # slli a1, s3, 9
+13 06 f0 0f  # li a2, 0xFF
+ef f0 df f3  # call spi_sd_cmd
+
+# Wait for data token (0xFE)
+# First 0xFF consumes the bridge RESPONSE→DATA_START transition
+#:spi_sd_read_wait_token
+13 05 f0 0f  # li a0, 0xFF
+ef f0 df f0  # call spi_transfer
+93 02 e0 0f  # li t0, 0xFE
+e3 1a 55 fe  # bne a0, t0, spi_sd_read_wait_token
+
+# Read 512 bytes
+93 09 00 20  # li s3, 512
+#:spi_sd_read_loop
+13 05 f0 0f  # li a0, 0xFF
+ef f0 9f ef  # call spi_transfer
+23 00 a4 00  # sb a0, 0(s0)
+13 04 14 00  # addi s0, s0, 1
+93 89 f9 ff  # addi s3, s3, -1
+e3 96 09 fe  # bnez s3, spi_sd_read_loop
+
+# Read 2 CRC bytes (discard)
+13 05 f0 0f  # li a0, 0xFF
+ef f0 1f ee  # call spi_transfer
+13 05 f0 0f  # li a0, 0xFF
+ef f0 9f ed  # call spi_transfer
+
+13 05 00 00  # li a0, 0
+
+83 30 01 00  # ld ra, 0(sp)
+03 34 81 00  # ld s0, 8(sp)
+83 39 01 01  # ld s3, 16(sp)
+13 01 81 01  # addi sp, sp, 24
+67 80 00 00  # ret
+
+#============================================================
+# spi_sd_write_sector: Write one 512-byte sector to SD card
+# a0 = sector number, a1 = source buffer address
+# Returns: a0 = 0 on success
+#============================================================
+#:spi_sd_write_sector
+13 01 81 fe  # addi sp, sp, -24
+23 30 11 00  # sd ra, 0(sp)
+23 34 81 00  # sd s0, 8(sp)
+23 38 31 01  # sd s3, 16(sp)
+
+13 84 05 00  # mv s0, a1
+93 09 05 00  # mv s3, a0
+
+# CMD24: WRITE_SINGLE_BLOCK (byte address = sector * 512)
+13 05 80 05  # li a0, 0x58
+93 95 99 00  # slli a1, s3, 9
+13 06 f0 0f  # li a2, 0xFF
+ef f0 1f ec  # call spi_sd_cmd
+
+# Send data token (0xFE)
+# First 0xFF consumes the RESPONSE→CMD transition, then 0xFE starts write
+13 05 f0 0f  # li a0, 0xFF
+ef f0 1f e9  # call spi_transfer
+13 05 e0 0f  # li a0, 0xFE
+ef f0 9f e8  # call spi_transfer
+
+# Write 512 bytes
+93 09 00 20  # li s3, 512
+#:spi_sd_write_loop
+03 45 04 00  # lbu a0, 0(s0)
+ef f0 df e7  # call spi_transfer
+13 04 14 00  # addi s0, s0, 1
+93 89 f9 ff  # addi s3, s3, -1
+e3 98 09 fe  # bnez s3, spi_sd_write_loop
+
+# Send 2 dummy CRC bytes
+13 05 f0 0f  # li a0, 0xFF
+ef f0 9f e6  # call spi_transfer
+13 05 f0 0f  # li a0, 0xFF
+ef f0 1f e6  # call spi_transfer
+
+# Wait for data response token
+13 05 f0 0f  # li a0, 0xFF
+ef f0 9f e5  # call spi_transfer
+
+# Wait while card is busy (DO = 0x00)
+#:spi_sd_write_busy
+13 05 f0 0f  # li a0, 0xFF
+ef f0 1f e5  # call spi_transfer
+e3 0c 05 fe  # beqz a0, spi_sd_write_busy
+
+13 05 00 00  # li a0, 0
+
+83 30 01 00  # ld ra, 0(sp)
+03 34 81 00  # ld s0, 8(sp)
+83 39 01 01  # ld s3, 16(sp)
+13 01 81 01  # addi sp, sp, 24
+67 80 00 00  # ret
+
+#============================================================
 # internalshell: Main command loop (runs in S-mode, paging OFF)
 # Reads commands from stdin (disk) and dispatches them
 #============================================================
@@ -2633,7 +3124,7 @@ b3 02 5a 00  # add t0, s4, t0
 23 3c 61 03  # sd s6, 56(sp)
 
 #:shell_loop
-ef f0 5f 87  # call read_stdin_byte
+ef f0 8f c8  # call read_stdin_byte
 13 04 05 00  # mv s0, a0
 
 # End of input (null byte)
@@ -2665,7 +3156,7 @@ e3 04 54 fe  # beq s0, t0, shell_loop
 6f 00 c0 3e  # j handle_other_command
 
 #:shell_skip_comment
-ef f0 5f 83  # call read_stdin_byte
+ef f0 8f c4  # call read_stdin_byte
 93 02 a0 00  # li t0, 0x0A
 e3 1c 55 fe  # bne a0, t0, shell_skip_comment
 6f f0 5f fb  # j shell_loop
@@ -2673,30 +3164,30 @@ e3 1c 55 fe  # bne a0, t0, shell_skip_comment
 #:shell_done
 # Print "Done.\n"
 13 05 40 04  # li a0, 0x44
-ef f0 4f e9  # call sbi_putchar
+ef f0 8f a7  # call sbi_putchar
 13 05 f0 06  # li a0, 0x6F
-ef f0 cf e8  # call sbi_putchar
+ef f0 0f a7  # call sbi_putchar
 13 05 e0 06  # li a0, 0x6E
-ef f0 4f e8  # call sbi_putchar
+ef f0 8f a6  # call sbi_putchar
 13 05 50 06  # li a0, 0x65
-ef f0 cf e7  # call sbi_putchar
+ef f0 0f a6  # call sbi_putchar
 13 05 e0 02  # li a0, 0x2E
-ef f0 4f e7  # call sbi_putchar
+ef f0 8f a5  # call sbi_putchar
 13 05 a0 00  # li a0, 0x0A
-ef f0 cf e6  # call sbi_putchar
+ef f0 0f a5  # call sbi_putchar
 
 # Flush disk
 ef 00 c0 68  # call flush_disk
 
 # Shutdown
-6f f0 cf f8  # j shutdown
+6f f0 0f b7  # j reboot
 
 #============================================================
 # handle_flush: 'f' command - enable disk flushing
 #============================================================
 #:handle_flush
 # Skip rest of line (newline)
-ef f0 cf fe  # call read_stdin_byte
+ef f0 0f c0  # call read_stdin_byte
 
 # Set enable_flush = 1
 b7 02 18 40  # lui t0, 0x40180
@@ -2706,9 +3197,9 @@ b7 02 18 40  # lui t0, 0x40180
 
 # Print "f\n"
 13 05 60 06  # li a0, 0x66
-ef f0 8f e4  # call sbi_putchar
+ef f0 cf a2  # call sbi_putchar
 13 05 a0 00  # li a0, 0x0A
-ef f0 0f e4  # call sbi_putchar
+ef f0 4f a2  # call sbi_putchar
 
 6f f0 5f f5  # j shell_loop
 
@@ -2725,23 +3216,23 @@ ef f0 0f e4  # call sbi_putchar
 #:handle_src
 # Print "src "
 13 05 30 07  # li a0, 0x73
-ef f0 4f e3  # call sbi_putchar
+ef f0 8f a1  # call sbi_putchar
 13 05 20 07  # li a0, 0x72
-ef f0 cf e2  # call sbi_putchar
+ef f0 0f a1  # call sbi_putchar
 13 05 30 06  # li a0, 0x63
-ef f0 4f e2  # call sbi_putchar
+ef f0 8f a0  # call sbi_putchar
 13 05 00 02  # li a0, 0x20
-ef f0 cf e1  # call sbi_putchar
+ef f0 0f a0  # call sbi_putchar
 
 # Skip "rc "
-ef f0 4f fa  # call read_stdin_byte
-ef f0 0f fa  # call read_stdin_byte
-ef f0 cf f9  # call read_stdin_byte
+ef f0 8f bb  # call read_stdin_byte
+ef f0 4f bb  # call read_stdin_byte
+ef f0 0f bb  # call read_stdin_byte
 
 # Parse decimal count into s1
 93 04 00 00  # li s1, 0
 #:src_parse_count
-ef f0 4f f9  # call read_stdin_byte
+ef f0 8f ba  # call read_stdin_byte
 93 02 00 02  # li t0, 0x20
 63 0c 55 00  # beq a0, t0, src_count_done
 93 02 a0 00  # li t0, 10
@@ -2757,7 +3248,7 @@ b7 09 00 50  # lui s3, 0x50000
 93 99 19 00  # slli s3, s3, 1
 13 8a 09 00  # mv s4, s3
 #:src_read_name
-ef f0 4f f6  # call read_stdin_byte
+ef f0 8f b7  # call read_stdin_byte
 93 02 a0 00  # li t0, 0x0A
 63 08 55 00  # beq a0, t0, src_name_done
 23 00 aa 00  # sb a0, 0(s4)
@@ -2768,13 +3259,13 @@ ef f0 4f f6  # call read_stdin_byte
 
 # Print filename + newline
 13 85 09 00  # mv a0, s3
-ef f0 4f e9  # call print_string
+ef f0 8f a7  # call print_string
 13 05 a0 00  # li a0, 0x0A
-ef f0 0f db  # call sbi_putchar
+ef f0 4f 99  # call sbi_putchar
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef f0 5f 87  # call absolute_path
+ef f0 8f c8  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Allocate new file entry
@@ -2819,7 +3310,7 @@ b7 02 18 40  # lui t0, 0x40180
 # Read s1 bytes from stdin and write to file
 #:src_read_data
 63 8c 04 00  # beqz s1, src_data_done
-ef f0 cf eb  # call read_stdin_byte
+ef f0 0f ad  # call read_stdin_byte
 23 00 aa 00  # sb a0, 0(s4)
 13 0a 1a 00  # addi s4, s4, 1
 93 84 f4 ff  # addi s1, s1, -1
@@ -2854,28 +3345,28 @@ b7 02 18 40  # lui t0, 0x40180
 #:handle_hex0
 # Print "hex0 "
 13 05 80 06  # li a0, 0x68
-ef f0 cf cf  # call sbi_putchar
+ef f0 0f 8e  # call sbi_putchar
 13 05 50 06  # li a0, 0x65
-ef f0 4f cf  # call sbi_putchar
+ef f0 8f 8d  # call sbi_putchar
 13 05 80 07  # li a0, 0x78
-ef f0 cf ce  # call sbi_putchar
+ef f0 0f 8d  # call sbi_putchar
 13 05 00 03  # li a0, 0x30
-ef f0 4f ce  # call sbi_putchar
+ef f0 8f 8c  # call sbi_putchar
 13 05 00 02  # li a0, 0x20
-ef f0 cf cd  # call sbi_putchar
+ef f0 0f 8c  # call sbi_putchar
 
 # Skip "ex0 "
-ef f0 4f e6  # call read_stdin_byte
-ef f0 0f e6  # call read_stdin_byte
-ef f0 cf e5  # call read_stdin_byte
-ef f0 8f e5  # call read_stdin_byte
+ef f0 8f a7  # call read_stdin_byte
+ef f0 4f a7  # call read_stdin_byte
+ef f0 0f a7  # call read_stdin_byte
+ef f0 cf a6  # call read_stdin_byte
 
 # Read input filename into scratch at 0xA0000000
 b7 04 00 50  # lui s1, 0x50000
 93 94 14 00  # slli s1, s1, 1
 13 8a 04 00  # mv s4, s1
 #:hex0_read_input
-ef f0 8f e4  # call read_stdin_byte
+ef f0 cf a5  # call read_stdin_byte
 93 02 00 02  # li t0, 0x20
 63 08 55 00  # beq a0, t0, hex0_input_done
 23 00 aa 00  # sb a0, 0(s4)
@@ -2886,9 +3377,9 @@ ef f0 8f e4  # call read_stdin_byte
 
 # Print input filename + space
 13 85 04 00  # mv a0, s1
-ef f0 8f d7  # call print_string
+ef f0 cf 95  # call print_string
 13 05 00 02  # li a0, 0x20
-ef f0 4f c9  # call sbi_putchar
+ef f0 8f 87  # call sbi_putchar
 
 # Read output filename into scratch + 0x400
 37 09 00 50  # lui s2, 0x50000
@@ -2896,7 +3387,7 @@ ef f0 4f c9  # call sbi_putchar
 13 09 09 40  # addi s2, s2, 0x400
 13 0a 09 00  # mv s4, s2
 #:hex0_read_output
-ef f0 cf e0  # call read_stdin_byte
+ef f0 0f a2  # call read_stdin_byte
 93 02 a0 00  # li t0, 0x0A
 63 08 55 00  # beq a0, t0, hex0_output_done
 23 00 aa 00  # sb a0, 0(s4)
@@ -2907,15 +3398,15 @@ ef f0 cf e0  # call read_stdin_byte
 
 # Print output filename + newline
 13 05 09 00  # mv a0, s2
-ef f0 cf d3  # call print_string
+ef f0 0f 92  # call print_string
 13 05 a0 00  # li a0, 0x0A
-ef f0 8f c5  # call sbi_putchar
+ef f0 cf 83  # call sbi_putchar
 
 # Resolve input filename and find file
 13 85 04 00  # mv a0, s1
-ef f0 cf f1  # call absolute_path
+ef f0 0f b3  # call absolute_path
 93 04 05 00  # mv s1, a0
-ef f0 1f 8b  # call find_file
+ef f0 4f cc  # call find_file
 e3 4e 05 d4  # bltz a0, shell_loop
 13 0a 05 00  # mv s4, a0
 
@@ -2929,7 +3420,7 @@ b3 82 62 00  # add t0, t0, t1
 
 # Resolve output filename and create file
 13 05 09 00  # mv a0, s2
-ef f0 cf ee  # call absolute_path
+ef f0 0f b0  # call absolute_path
 13 09 05 00  # mv s2, a0
 
 # Allocate output file
@@ -3099,7 +3590,7 @@ b3 84 54 00  # add s1, s1, t0
 
 # Read rest of command name until space
 #:hoc_read_name
-ef f0 cf c1  # call read_stdin_byte
+ef f0 0f 83  # call read_stdin_byte
 93 02 00 02  # li t0, 0x20
 63 08 55 00  # beq a0, t0, hoc_name_done
 23 00 a9 00  # sb a0, 0(s2)
@@ -3116,7 +3607,7 @@ ef f0 cf c1  # call read_stdin_byte
 33 09 59 00  # add s2, s2, t0
 93 09 09 00  # mv s3, s2
 #:hoc_read_arg
-ef f0 8f be  # call read_stdin_byte
+ef e0 df ff  # call read_stdin_byte
 93 02 a0 00  # li t0, 0x0A
 63 08 55 00  # beq a0, t0, hoc_arg_done
 23 80 a9 00  # sb a0, 0(s3)
@@ -3127,13 +3618,13 @@ ef f0 8f be  # call read_stdin_byte
 
 # Print command name + space + arg + newline
 13 85 04 00  # mv a0, s1
-ef f0 8f b1  # call print_string
+ef e0 df ef  # call print_string
 13 05 00 02  # li a0, 0x20
-ef f0 4f a3  # call sbi_putchar
+ef e0 9f e1  # call sbi_putchar
 13 05 09 00  # mv a0, s2
-ef f0 8f b0  # call print_string
+ef e0 df ee  # call print_string
 13 05 a0 00  # li a0, 0x0A
-ef f0 4f a2  # call sbi_putchar
+ef e0 9f e0  # call sbi_putchar
 
 # Set up argv in global data: cmd_args at globals+0x58
 # argv[0] = command name, argv[1] = arg, argv[2] = NULL
@@ -3146,11 +3637,11 @@ b7 02 18 40  # lui t0, 0x40180
 
 # Resolve command name to absolute path
 13 85 04 00  # mv a0, s1
-ef f0 0f cd  # call absolute_path
+ef f0 4f 8e  # call absolute_path
 93 04 05 00  # mv s1, a0
 
 # Find executable file
-ef f0 4f e6  # call find_file
+ef f0 8f a7  # call find_file
 63 4e 05 1e  # bltz a0, hoc_not_found
 93 09 05 00  # mv s3, a0
 
@@ -3170,7 +3661,7 @@ b7 02 18 40  # lui t0, 0x40180
 23 b0 62 02  # sd t1, 0x20(t0)
 
 # Get process descriptor for new process
-ef f0 cf c6  # call get_process_base
+ef f0 0f 88  # call get_process_base
 93 0a 05 00  # mv s5, a0
 
 # Copy cwd from previous process
@@ -3193,7 +3684,7 @@ b3 82 5a 40  # sub t0, s5, t0
 13 85 0a 20  # addi a0, s5, 0x200
 b7 15 00 00  # li a1, 3584 (upper)
 93 85 05 e0  # li a1, 3584 (lower)
-ef f0 cf ac  # call memset_zero
+ef e0 9f ea  # call memset_zero
 
 # Parse 64-bit ELF header
 03 bb 89 01  # ld s6, 0x18(s3)
@@ -3205,7 +3696,7 @@ ef f0 cf ac  # call memset_zero
 37 05 30 40  # lui a0, 0x40300
 13 15 15 00  # slli a0, a0, 1
 b7 05 20 00  # lui a1, 0x200
-ef f0 cf aa  # call memset_zero
+ef e0 9f e8  # call memset_zero
 
 # Reset brk
 b7 02 18 40  # lui t0, 0x40180
@@ -3228,7 +3719,7 @@ b3 85 59 00  # add a1, s3, t0
 13 13 13 00  # slli t1, t1, 1
 33 85 62 00  # add a0, t0, t1
 03 36 0a 02  # ld a2, 0x20(s4)
-ef f0 0f a8  # call memcpy
+ef e0 df e5  # call memcpy
 
 # Update brk = max(brk, end_of_segment_PA + padding)
 83 32 0a 01  # ld t0, 0x10(s4)
@@ -3286,7 +3777,7 @@ b7 02 f8 47  # lui t0, 0x47F80
 13 85 09 00  # mv a0, s3
 93 05 09 00  # mv a1, s2
 13 06 00 10  # li a2, 256
-ef f0 cf 9e  # call memcpy
+ef e0 9f dc  # call memcpy
 # VA of arg = 0x0FF00000
 b7 02 00 40  # lui t0, 0x40000
 93 92 12 00  # slli t0, t0, 1
@@ -3300,7 +3791,7 @@ b3 82 59 40  # sub t0, s3, t0
 13 05 0a 00  # mv a0, s4
 93 85 04 00  # mv a1, s1
 13 06 00 10  # li a2, 256
-ef f0 4f 9c  # call memcpy
+ef e0 1f da  # call memcpy
 b7 02 00 40  # lui t0, 0x40000
 93 92 12 00  # slli t0, t0, 1
 b3 02 5a 40  # sub t0, s4, t0
@@ -3364,9 +3855,9 @@ b7 02 18 40  # lui t0, 0x40180
 #:hoc_not_found
 # Print "?\n"
 13 05 f0 03  # li a0, 0x3F
-ef e0 9f ff  # call sbi_putchar
+ef e0 df bd  # call sbi_putchar
 13 05 a0 00  # li a0, 0x0A
-ef e0 1f ff  # call sbi_putchar
+ef e0 5f bd  # call sbi_putchar
 6f f0 5f 90  # j shell_loop
 
 # Return point after user program exits
@@ -3412,7 +3903,7 @@ a3 02 55 00  # sb t0, 5(a0)
 93 02 10 06  # li t0, 0x61
 a3 03 55 00  # sb t0, 7(a0)
 23 04 05 00  # sb zero, 8(a0)
-ef f0 4f bd  # call find_file
+ef e0 9f fe  # call find_file
 63 40 05 04  # bltz a0, flush_done
 
 # Get file address and length
@@ -3431,7 +3922,7 @@ b3 82 62 00  # add t0, t0, t1
 # Write 512 bytes from s0 to disk sector s2
 13 05 09 00  # mv a0, s2
 93 05 04 00  # mv a1, s0
-ef f0 0f ef  # call virtio_write_sector
+ef f0 4f bd  # call disk_write_sector
 
 13 04 04 20  # addi s0, s0, 512
 93 84 04 e0  # addi s1, s1, -512
@@ -3454,11 +3945,12 @@ ef f0 0f ef  # call virtio_write_sector
 b7 02 00 54  # lui t0, 0x54000
 13 91 12 00  # slli sp, t0, 1
 
-# Save a0 = stdin_sector from stage1 bootloader
+# Save a0 = stdin_sector and a1 = DTB pointer from stage1
 13 0b 05 00  # mv s6, a0
+93 8b 05 00  # mv s7, a1
 
 # Load RAM base into s2 = 0x80210000
-ef f0 4f 81  # call load_ram_base
+ef e0 5f bf  # call load_ram_base
 
 # Set up trap handler early (before any MMIO access)
 93 02 49 00  # addi t0, s2, 4
@@ -3468,8 +3960,25 @@ ef f0 4f 81  # call load_ram_base
 # Disable all S-mode interrupts (timer, external, software)
 73 10 40 10  # csrrw zero, sie, zero
 
-# Initialize VirtIO block device
-ef f0 4f c0  # call virtio_init
+# Parse device tree to find storage device
+13 85 0b 00  # mv a0, s7
+ef f0 0f 81  # call fdt_find_storage
+
+# Dispatch to appropriate storage driver
+93 02 10 00  # li t0, 1
+63 88 55 00  # beq a1, t0, init_virtio
+93 02 20 00  # li t0, 2
+63 88 55 00  # beq a1, t0, init_spi_sd
+6f e0 1f be  # j reboot
+
+#:init_virtio
+ef f0 0f a0  # call virtio_init
+6f 00 80 00  # j storage_ready
+
+#:init_spi_sd
+ef f0 8f e8  # call spi_sd_init
+
+#:storage_ready
 
 # --- Initialize filesystem ---
 
@@ -3501,6 +4010,9 @@ b7 02 18 40  # lui t0, 0x40180
 # have_userspace = 0
 23 b8 02 04  # sd zero, 0x50(t0)
 
+# Store DTB pointer in globals for future use
+23 b0 72 09  # sd s7, 0x80(t0)
+
 # Initialize brk = 0x80700000 (PA, 1MB above ELF base)
 37 03 38 40  # lui t1, 0x40380
 13 13 13 00  # slli t1, t1, 1
@@ -3515,19 +4027,19 @@ b7 02 18 40  # lui t0, 0x40180
 37 05 20 40  # lui a0, 0x40200
 13 15 15 00  # slli a0, a0, 1
 b7 05 01 00  # lui a1, 0x10
-ef e0 df fd  # call memset_zero
+ef e0 df b8  # call memset_zero
 
 # Zero file names area (8MB at 0x80800000)
 37 05 01 50  # lui a0, 0x50010
 13 15 15 00  # slli a0, a0, 1
 b7 05 80 00  # lui a1, 0x800
-ef e0 df fc  # call memset_zero
+ef e0 df b7  # call memset_zero
 
 # Zero file descriptors area (512KB at 0x81000000)
 37 05 41 50  # lui a0, 0x50410
 13 15 15 00  # slli a0, a0, 1
 b7 05 08 00  # lui a1, 0x80
-ef e0 df fb  # call memset_zero
+ef e0 df b6  # call memset_zero
 
 # Set process 0 current_dir = "/"
 b7 02 20 40  # lui t0, 0x40200
@@ -3547,7 +4059,7 @@ a3 80 02 10  # sb zero, 0x101(t0)
 73 90 52 10  # csrrw zero, stvec, t0
 
 # Set up Sv39 page table
-ef f0 cf 84  # call setup_page_table
+ef e0 5f c3  # call setup_page_table
 
 # Jump to internal shell
-6f f0 0f f3  # j internalshell
+6f f0 4f f0  # j internalshell
