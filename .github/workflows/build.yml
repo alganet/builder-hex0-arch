@@ -17,6 +17,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [riscv64, aarch64]
     steps:
       - uses: actions/checkout@v5
 
@@ -31,16 +34,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: qemu-local
-          key: qemu-riscv64-${{ env.QEMU_VERSION }}
+          key: qemu-riscv64-aarch64-${{ env.QEMU_VERSION }}
 
-      - name: Build QEMU (riscv64 only)
+      - name: Build QEMU (riscv64 + aarch64)
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
           pip install meson
           git clone --depth 1 --branch v${{ env.QEMU_VERSION }} \
             https://gitlab.com/qemu-project/qemu.git /tmp/qemu-build
           cd /tmp/qemu-build
-          ./configure --target-list=riscv64-softmmu \
+          ./configure --target-list=riscv64-softmmu,aarch64-softmmu \
             --prefix=${{ github.workspace }}/qemu-local \
             --disable-docs --disable-gtk --disable-sdl \
             --disable-opengl --disable-virglrenderer
@@ -49,8 +52,12 @@ jobs:
           rm -rf /tmp/qemu-build
 
       - name: Verify QEMU
-        run: qemu-local/bin/qemu-system-riscv64 --version
+        run: |
+          qemu-local/bin/qemu-system-riscv64 --version
+          qemu-local/bin/qemu-system-aarch64 --version
 
-      - run: make clean && make
+      - name: Build
+        run: make clean ${{ matrix.arch }}
 
-      - run: QEMU=qemu-local/bin/qemu-system-riscv64 make test
+      - name: Test
+        run: QEMU=qemu-local/bin/qemu-system-${{ matrix.arch }} make test-${{ matrix.arch }}

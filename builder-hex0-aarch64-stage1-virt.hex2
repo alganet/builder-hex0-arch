@@ -1,0 +1,196 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builder-hex0 AArch64 Stage 1
+#
+# Board-specific hex0 compiler bootloader for QEMU virt.
+# Loaded by QEMU -kernel (x0=dtb_ptr).
+# Reads hex0 source from disk sector 0, compiles to binary at 0x40210000,
+# jumps there with x0 = next disk sector, x1 = DTB pointer.
+#
+# Uses VirtIO MMIO v1 (legacy) protocol.
+#
+# Registers (callee-saved x19-x28):
+#   x19 = hex state (0=first nibble, 1=have first)
+#   x20 = current disk sector
+#   x21 = offset in buffer (0-511, init 512 to force read)
+#   x22 = VirtIO MMIO base
+#   x23 = VirtIO struct base (0x40500000)
+#   x24 = output write pointer
+#   x25 = high nibble accumulator
+#   x26 = sector buffer (x23+0x3000)
+#   x27 = DTB pointer (from QEMU x0)
+#   x28 = saved lr in next_byte
+
+:_start
+FB0300AA  # mov x27, x0 # save DTB pointer
+0000ADD2  # movz x0, #0x6800, lsl #16
+1F000091  # mov sp, x0 # sp = 0x68000000
+170AA8D2  # movz x23, #0x4050, lsl #16 # x23 = 0x40500000
+
+    ; Scan VirtIO MMIO 0x0A000000..0x0A004000 (step 0x200, 32 slots)
+1640A1D2  # movz x22, #0x0A00, lsl #16 # x22 = 0x0A000000
+:scan
+C00240B9  # ldr w0, [x22] # read magic
+C12E8DD2  # movz w1, #0x6976
+418EAEF2  # movk w1, #0x7472, lsl #16 # w1 = 0x74726976
+1F0001EB  # cmp w0, w1
+81000054  # b.ne scan_next
+C00A40B9  # ldr w0, [x22, #8] # read device ID
+1F0800F1  # cmp w0, #2
+E0000054  # b.eq found
+:scan_next
+D6020891  # add x22, x22, #0x200
+010088D2  # movz x1, #0x4000
+0140A1F2  # movk x1, #0x0A00, lsl #16 # x1 = 0x0A004000
+DF0201EB  # cmp x22, x1
+8BFEFF54  # b.lt scan
+:halt
+00000014  # b halt
+
+:found
+    ; Legacy VirtIO v1 init
+600080D2  # movz w0, #3
+C07200B9  # str w0, [x22, #0x70] # ACKNOWLEDGE|DRIVER
+000082D2  # movz w0, #0x1000
+C02A00B9  # str w0, [x22, #0x28] # GuestPageSize=4096
+C03E00B9  # str w0, [x22, #0x3C] # QueueAlign=4096
+000180D2  # movz w0, #8
+C03A00B9  # str w0, [x22, #0x38] # queue size=8
+E0FE4CD3  # lsr x0, x23, #12
+C04200B9  # str w0, [x22, #0x40] # QueuePFN = x23/4096
+E00080D2  # movz w0, #7
+C07200B9  # str w0, [x22, #0x70] # DRIVER_OK
+
+    ; x26 = sector buffer at x23+0x3000
+FA0E4091  # add x26, x23, #0x3000
+
+    ; Init compiler state
+3804A8D2  # movz x24, #0x4021, lsl #16 # x24 = 0x40210000 (output)
+130080D2  # movz x19, #0 # state
+140080D2  # movz x20, #0 # sector
+154080D2  # movz x21, #512 # offset (force first read)
+
+    ; --- Hex0 main loop ---
+:hex0_loop
+26000094  # bl next_byte
+200400B4  # cbz w0, hex0_done
+    ; Whitespace: anything <= 0x20
+1F8400F1  # cmp w0, #0x21
+ABFFFF54  # b.lt hex0_loop
+    ; Comments
+1F8C00F1  # cmp w0, #0x23
+00030054  # b.eq skip_comment
+1FEC00F1  # cmp w0, #0x3B
+C0020054  # b.eq skip_comment
+    ; Force uppercase: if >= 'a', subtract 0x20
+1F8401F1  # cmp w0, #0x61
+4B000054  # b.lt no_lower
+008000D1  # sub w0, w0, #0x20
+:no_lower
+    ; Parse hex: '0'-'9' then 'A'-'F'
+01C000D1  # sub w1, w0, #0x30
+3F0000F1  # cmp w1, #0
+6BFEFF54  # b.lt hex0_loop # < '0'
+3F2800F1  # cmp w1, #10
+AB000054  # b.lt got_nibble # 0-9
+214400D1  # sub w1, w1, #17 # 'A'->0, 'F'->5
+3F1800F1  # cmp w1, #6
+C2FDFF54  # b.hs hex0_loop # rejects gap and > 'F' (unsigned)
+21280091  # add w1, w1, #10 # 0->10, 5->15
+:got_nibble
+    ; w1 = nibble (0-15)
+930000B5  # cbnz w19, second_nibble
+39EC7CD3  # lsl w25, w1, #4
+330080D2  # movz w19, #1
+E9FFFF17  # b hex0_loop
+:second_nibble
+210301AA  # orr w1, w25, w1
+01030039  # strb w1, [x24]
+18070091  # add x24, x24, #1
+130080D2  # movz w19, #0
+E4FFFF17  # b hex0_loop
+
+:skip_comment
+09000094  # bl next_byte
+800000B4  # cbz w0, hex0_done
+1F2800F1  # cmp w0, #0x0A
+A1FFFF54  # b.ne skip_comment
+DFFFFF17  # b hex0_loop
+
+:hex0_done
+E00314AA  # mov x0, x20
+E1031BAA  # mov x1, x27 # pass DTB pointer to stage 2
+2204A8D2  # movz x2, #0x4021, lsl #16 # x2 = 0x40210000
+40001FD6  # br x2
+
+; --- next_byte: return next byte in w0 ---
+:next_byte
+BF0208F1  # cmp w21, #512
+CB000054  # b.lt nb_ready
+FC031EAA  # mov x28, lr
+07000094  # bl read_sector
+FE031CAA  # mov lr, x28
+94060091  # add x20, x20, #1
+150080D2  # movz x21, #0
+:nb_ready
+406B7538  # ldrb w0, [x26, x21]
+B5060091  # add x21, x21, #1
+C0035FD6  # ret
+
+; --- read_sector: read sector x20 via VirtIO into x26 ---
+:read_sector
+    ; Header at x23+0x2000
+E20A4091  # add x2, x23, #0x2000
+5F0000F9  # str xzr, [x2] # type=0 (READ), reserved=0
+540400F9  # str x20, [x2, #8] # sector number
+
+    ; Descriptor 0: header (x2, 16B, NEXT, next=1)
+E20200F9  # str x2, [x23]
+000280D2  # movz w0, #16
+E00A00B9  # str w0, [x23, #8]
+200080D2  # movz w0, #1
+E01A0079  # strh w0, [x23, #12]
+E01E0079  # strh w0, [x23, #14]
+
+    ; Descriptor 1: data (x26, 512B, NEXT|WRITE, next=2)
+FA0A00F9  # str x26, [x23, #16]
+004080D2  # movz w0, #512
+E01A00B9  # str w0, [x23, #24]
+600080D2  # movz w0, #3
+E03A0079  # strh w0, [x23, #28]
+400080D2  # movz w0, #2
+E03E0079  # strh w0, [x23, #30]
+
+    ; Descriptor 2: status (x2+0x10, 1B, WRITE)
+40400091  # add x0, x2, #0x10
+E01200F9  # str x0, [x23, #32]
+200080D2  # movz w0, #1
+E02A00B9  # str w0, [x23, #40]
+400080D2  # movz w0, #2
+E05A0079  # strh w0, [x23, #44]
+FF5E0079  # strh wzr, [x23, #46]
+
+    ; Save used.idx, update avail ring
+E0064091  # add x0, x23, #0x1000
+01044079  # ldrh w1, [x0, #2] # w1 = initial used.idx
+E0020291  # add x0, x23, #0x80
+03044079  # ldrh w3, [x0, #2]
+62084092  # and w2, w3, #7
+42F87FD3  # lsl w2, w2, #1
+42100091  # add w2, w2, #4
+0200028B  # add x2, x0, x2
+5F000079  # strh wzr, [x2]
+63040091  # add w3, w3, #1
+03040079  # strh w3, [x0, #2]
+
+9F3F03D5  # dsb sy
+DF5200B9  # str wzr, [x22, #0x50] # notify
+
+E0064091  # add x0, x23, #0x1000
+:rs_poll
+9F3F03D5  # dsb sy
+03044079  # ldrh w3, [x0, #2]
+7F0001EB  # cmp w3, w1
+A0FFFF54  # b.eq rs_poll
+C0035FD6  # ret

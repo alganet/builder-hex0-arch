@@ -1,0 +1,3640 @@
+; SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+; SPDX-License-Identifier: Apache-2.0
+;
+; Builder-hex0 AArch64 Stage 2
+;
+; A minimal kernel for bootstrapping compilers from source on AArch64.
+; Inspired by builder-hex0 (https://github.com/ironmeld/builder-hex0).
+;
+; Boot: qemu-system-aarch64 -machine virt -cpu cortex-a53 -m 2G -nographic \
+;       -kernel builder-hex0-aarch64-stage1-virt.bin \
+;       -drive file=disk.img,format=raw,if=none,id=hd0 \
+;       -device virtio-blk-device,drive=hd0 --no-reboot
+;
+; Compiled by stage 1 from hex0 source on disk to 0x40210000.
+; On entry: x0 = next disk sector (filesystem start), x1 = DTB pointer
+;
+; Memory layout (physical addresses):
+;   0x40100000  Page table (4KB aligned, level 1)
+;   0x40210000  Kernel code (base)
+;   0x40300000  Kernel global data (variables)
+;   0x40500000  VirtIO structures (desc/avail/used/buffers)
+;   0x40600000  User process area (VA 0x00600000 via page table)
+;   0x50000000  User stack top (VA 0x10000000, grows down)
+;   0x60000000  Scratch buffer (64KB)
+;   0x60010000  stdin device buffer (64KB)
+;   0x60020000  File names (8MB, 8192 entries x 1024 bytes)
+;   0x60400000  Process descriptors (16 x 4096)
+;   0x60820000  File descriptors (512KB, 32768 x 16 bytes)
+;   0x68000000  Kernel stack top (grows down)
+;   0x70000000  Saved process memory (bump allocator)
+;   0x94000000  File data (bump allocator, next_file_address)
+;
+; AArch64 paging (1GB block descriptors, level 1 table):
+;   Entry 0: VA 0x00000000-0x3FFFFFFF -> PA 0x40000000 (User, Normal memory)
+;   Entry 1: VA 0x40000000-0x7FFFFFFF -> PA 0x40000000 (Kernel, Normal memory)
+;   Entry 2: VA 0x80000000-0xBFFFFFFF -> PA 0x80000000 (Kernel, Normal, upper RAM)
+;   Entry 3: VA 0xC0000000-0xFFFFFFFF -> PA 0x00000000 (Device nGnRE, MMIO)
+;   MMU stays on during kernel execution. Entry 3 maps MMIO at VA 0xC0000000+.
+;
+; Global data at 0x40300000:
+;   +0x000: storage_mmio_base (8 bytes)
+;   +0x008: virtio_struct_base (8 bytes)
+;   +0x010: next_filenum (8 bytes)
+;   +0x018: next_file_address (8 bytes)
+;   +0x020: next_process_num (8 bytes)
+;   +0x028: next_save_process_address (8 bytes)
+;   +0x030: stdin_sector (8 bytes)
+;   +0x038: stdin_offset (8 bytes)
+;   +0x040: current_brk (8 bytes)
+;   +0x048: enable_flush (8 bytes)
+;   +0x050: have_userspace (8 bytes)
+;   +0x058: cmd_args (3x8: argv[0], argv[1], NULL)
+;   +0x070: cmd_env (1x8: NULL)
+;   +0x078: (unused)
+;   +0x080: dtb_pointer (8 bytes)
+;   +0x088: disk_read_fn (8 bytes)
+;   +0x090: disk_write_fn (8 bytes)
+;   +0x098: spi_base (8 bytes)
+;
+; Process descriptor (4096 bytes each, at 0x60400000):
+;   +0x000: process_address (8)
+;   +0x008: brk (8)
+;   +0x010: saved_stack_pointer (8)
+;   +0x018: saved_stack_pointer_fork (8)
+;   +0x020: forked (8)
+;   +0x028: saved_brk (8)
+;   +0x030: child_exit_code (8)
+;   +0x038: saved_process_mem_addr (8)
+;   +0x040: saved_process_mem_len (8)
+;   +0x048: saved_stack_addr (8)
+;   +0x050: saved_stack_len (8)
+;   +0x058: saved_user_stack_addr (8)
+;   +0x060: saved_user_stack_len (8)
+;   +0x100: current_dir (256 bytes)
+;   +0x200: open_files (448 entries x 8 bytes)
+;
+; Register conventions:
+;   x19-x28 = callee-saved (s0-s9 equivalent)
+;   x9-x15  = caller-saved temporaries (t0-t6 equivalent)
+;   x0-x7   = arguments/return (a0-a7 equivalent)
+;   x8      = syscall number
+;   x30/lr  = link register (ra equivalent)
+;   sp      = stack pointer
+;
+; Trap frame layout (272 bytes, 16-byte aligned):
+;   offset 0:   x0  (arg0 / return value)
+;   offset 8:   x1  (arg1)
+;   offset 16:  x2  (arg2)
+;   offset 24:  x3  (arg3)
+;   offset 32:  x4
+;   offset 40:  x5
+;   offset 48:  x6
+;   offset 56:  x7
+;   offset 64:  x8  (syscall number)
+;   offset 72:  x9
+;   offset 80:  x10
+;   offset 88:  x11
+;   offset 96:  x12
+;   offset 104: x13
+;   offset 112: x14
+;   offset 120: x15
+;   offset 128: x16
+;   offset 136: x17
+;   offset 144: x18
+;   offset 152: x19
+;   offset 160: x20
+;   offset 168: x21
+;   offset 176: x22
+;   offset 184: x23
+;   offset 192: x24
+;   offset 200: x25
+;   offset 208: x26
+;   offset 216: x27
+;   offset 224: x28
+;   offset 232: x29
+;   offset 240: x30
+;   offset 248: SP_EL0
+;   offset 256: ELR_EL1
+;   offset 264: padding (alignment)
+
+:_start
+7C0C0014  # b main
+
+;============================================================
+; Exception vector table (must be 2KB aligned)
+; 16 entries x 128 bytes each = 2048 bytes
+; We only handle Lower EL AArch64 Synchronous (offset 0x400)
+;============================================================
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 2048 (2044 bytes padding)
+:exception_vectors
+    ; Current EL with SP_EL0 - Synchronous
+B4050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_EL0 - IRQ
+94050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_EL0 - FIQ
+74050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_EL0 - SError
+54050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+
+    ; Current EL with SP_ELx - Synchronous
+34050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_ELx - IRQ
+14050014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_ELx - FIQ
+F4040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Current EL with SP_ELx - SError
+D4040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+
+    ; Lower EL AArch64 - Synchronous (SVC handler) - offset 0x400
+00010014  # b trap_handler
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch64 - IRQ
+94040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch64 - FIQ
+74040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch64 - SError
+54040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+
+    ; Lower EL AArch32 - Synchronous
+34040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch32 - IRQ
+14040014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch32 - FIQ
+F4030014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+    ; Lower EL AArch32 - SError
+D4030014  # b reboot
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
+
+;============================================================
+; Trap handler
+; Entered on SVC from EL0. CPU auto-saves PC to ELR_EL1,
+; PSTATE to SPSR_EL1, switches to SP_EL1.
+;============================================================
+:trap_handler
+    ; Save x9 before using it as scratch (push to stack temporarily)
+FF4304D1  # sub sp, sp, #272
+E92700F9  # str x9, [sp, #72]
+
+    ; Save all general-purpose registers
+E00300F9  # str x0, [sp, #0]
+E10700F9  # str x1, [sp, #8]
+E20B00F9  # str x2, [sp, #16]
+E30F00F9  # str x3, [sp, #24]
+E41300F9  # str x4, [sp, #32]
+E51700F9  # str x5, [sp, #40]
+E61B00F9  # str x6, [sp, #48]
+E71F00F9  # str x7, [sp, #56]
+E82300F9  # str x8, [sp, #64]
+    ; x9 already saved above
+EA2B00F9  # str x10, [sp, #80]
+EB2F00F9  # str x11, [sp, #88]
+EC3300F9  # str x12, [sp, #96]
+ED3700F9  # str x13, [sp, #104]
+EE3B00F9  # str x14, [sp, #112]
+EF3F00F9  # str x15, [sp, #120]
+F04300F9  # str x16, [sp, #128]
+F14700F9  # str x17, [sp, #136]
+F24B00F9  # str x18, [sp, #144]
+F34F00F9  # str x19, [sp, #152]
+F45300F9  # str x20, [sp, #160]
+F55700F9  # str x21, [sp, #168]
+F65B00F9  # str x22, [sp, #176]
+F75F00F9  # str x23, [sp, #184]
+F86300F9  # str x24, [sp, #192]
+F96700F9  # str x25, [sp, #200]
+FA6B00F9  # str x26, [sp, #208]
+FB6F00F9  # str x27, [sp, #216]
+FC7300F9  # str x28, [sp, #224]
+FD7700F9  # str x29, [sp, #232]
+FE7B00F9  # str x30, [sp, #240]
+
+    ; Save user SP
+094138D5  # mrs x9, sp_el0
+E97F00F9  # str x9, [sp, #248]
+
+    ; Save return address
+294038D5  # mrs x9, elr_el1
+E98300F9  # str x9, [sp, #256]
+
+    ; Check ESR_EL1 for SVC from AArch64 (EC=0x15)
+095238D5  # mrs x9, esr_el1
+29FD5AD3  # lsr x9, x9, #26
+3F5500F1  # cmp x9, #0x15
+80000054  # b.eq dispatch
+
+    ; Not SVC: terminate process with exit code 139 (like SIGSEGV)
+691180D2  # mov x9, #139
+E90300F9  # str x9, [sp, #0]
+FE020014  # b syscall_exit
+
+; Dispatch syscall based on x8
+:dispatch
+E82340F9  # ldr x8, [sp, #64]
+
+1F0101F1  # cmp x8, #64
+E0040054  # b.eq tramp_write
+1F7501F1  # cmp x8, #93
+C0040054  # b.eq tramp_exit
+1F5903F1  # cmp x8, #214
+A0040054  # b.eq tramp_brk
+1FFD00F1  # cmp x8, #63
+80040054  # b.eq tramp_read
+1FE100F1  # cmp x8, #56
+60040054  # b.eq tramp_openat
+1FE500F1  # cmp x8, #57
+40040054  # b.eq tramp_close
+1FF900F1  # cmp x8, #62
+20040054  # b.eq tramp_lseek
+1FC500F1  # cmp x8, #49
+00040054  # b.eq tramp_chdir
+1F4500F1  # cmp x8, #17
+E0030054  # b.eq tramp_getcwd
+1FC100F1  # cmp x8, #48
+C0030054  # b.eq tramp_faccessat
+1F8900F1  # cmp x8, #34
+A0030054  # b.eq tramp_mkdirat
+1F7103F1  # cmp x8, #220
+80030054  # b.eq tramp_clone
+1F7503F1  # cmp x8, #221
+60030054  # b.eq tramp_execve
+1F7D01F1  # cmp x8, #95
+40030054  # b.eq tramp_waitid
+892080D2  # movz x9, #260
+1F0109EB  # cmp x8, x9
+00030054  # b.eq tramp_wait4
+1F8101F1  # cmp x8, #96
+E0020054  # b.eq tramp_stub
+1F7500F1  # cmp x8, #29
+A0020054  # b.eq tramp_stub
+1FD500F1  # cmp x8, #53
+60020054  # b.eq tramp_stub
+
+    ; Unknown syscall
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+11000014  # b trap_exit
+
+; Trampolines
+:tramp_write
+37000014  # b syscall_write
+:tramp_exit
+D3020014  # b syscall_exit
+:tramp_brk
+66000014  # b syscall_brk
+:tramp_read
+7B000014  # b syscall_read
+:tramp_openat
+BA000014  # b syscall_openat
+:tramp_close
+07010014  # b syscall_close
+:tramp_lseek
+0E010014  # b syscall_lseek
+:tramp_chdir
+28010014  # b syscall_chdir
+:tramp_getcwd
+4D010014  # b syscall_getcwd
+:tramp_faccessat
+6F010014  # b syscall_faccessat
+:tramp_mkdirat
+7B010014  # b syscall_mkdirat
+:tramp_clone
+B3010014  # b syscall_clone
+:tramp_execve
+FA010014  # b syscall_execve
+:tramp_waitid
+F3020014  # b syscall_waitid
+:tramp_wait4
+FC020014  # b syscall_wait4
+:tramp_stub
+AD010014  # b syscall_stub_zero
+
+;============================================================
+; trap_exit: Restore all registers and eret
+; NOTE: No ELR_EL1 += 4 needed (AArch64 SVC returns to next insn)
+;============================================================
+:trap_exit
+    ; Restore ELR_EL1
+E98340F9  # ldr x9, [sp, #256]
+294018D5  # msr elr_el1, x9
+
+    ; Restore user SP
+E97F40F9  # ldr x9, [sp, #248]
+094118D5  # msr sp_el0, x9
+
+    ; Set SPSR_EL1 = 0 (return to EL0, AArch64, interrupts unmasked)
+090080D2  # movz x9, #0
+094018D5  # msr spsr_el1, x9
+
+    ; Restore all registers
+E00340F9  # ldr x0, [sp, #0]
+E10740F9  # ldr x1, [sp, #8]
+E20B40F9  # ldr x2, [sp, #16]
+E30F40F9  # ldr x3, [sp, #24]
+E41340F9  # ldr x4, [sp, #32]
+E51740F9  # ldr x5, [sp, #40]
+E61B40F9  # ldr x6, [sp, #48]
+E71F40F9  # ldr x7, [sp, #56]
+E82340F9  # ldr x8, [sp, #64]
+    ; x9 restored last (used as scratch)
+EA2B40F9  # ldr x10, [sp, #80]
+EB2F40F9  # ldr x11, [sp, #88]
+EC3340F9  # ldr x12, [sp, #96]
+ED3740F9  # ldr x13, [sp, #104]
+EE3B40F9  # ldr x14, [sp, #112]
+EF3F40F9  # ldr x15, [sp, #120]
+F04340F9  # ldr x16, [sp, #128]
+F14740F9  # ldr x17, [sp, #136]
+F24B40F9  # ldr x18, [sp, #144]
+F34F40F9  # ldr x19, [sp, #152]
+F45340F9  # ldr x20, [sp, #160]
+F55740F9  # ldr x21, [sp, #168]
+F65B40F9  # ldr x22, [sp, #176]
+F75F40F9  # ldr x23, [sp, #184]
+F86340F9  # ldr x24, [sp, #192]
+F96740F9  # ldr x25, [sp, #200]
+FA6B40F9  # ldr x26, [sp, #208]
+FB6F40F9  # ldr x27, [sp, #216]
+FC7340F9  # ldr x28, [sp, #224]
+FD7740F9  # ldr x29, [sp, #232]
+FE7B40F9  # ldr x30, [sp, #240]
+
+    ; Deallocate frame and restore x9
+E92740F9  # ldr x9, [sp, #72]
+FF430491  # add sp, sp, #272
+
+E0039FD6  # eret
+
+;============================================================
+; syscall_write: write(fd, buf, count) -> count
+; x0(0)=fd, x1(8)=buf, x2(16)=count
+;============================================================
+:syscall_write
+    ; Load args from trap frame
+F50340F9  # ldr x21, [sp, #0] # fd
+F60740F9  # ldr x22, [sp, #8] # buf (VA)
+F70B40F9  # ldr x23, [sp, #16] # count
+F80317AA  # mov x24, x23 # save original count
+
+    ; Translate buf VA -> PA: PA = VA + 0x40000000
+0900A8D2  # movz x9, #0x4000, lsl #16
+D602098B  # add x22, x22, x9
+
+    ; If fd <= 2, write to console
+BF0E00F1  # cmp x21, #3
+4B000054  # b.lt write_console
+09000014  # b write_file
+
+:write_console
+:write_loop
+D70000B4  # cbz x23, write_done
+C0024039  # ldrb w0, [x22]
+D3020094  # bl uart_putchar
+D6060091  # add x22, x22, #1
+F70600D1  # sub x23, x23, #1
+FBFFFF17  # b write_loop
+
+:write_done
+F80300F9  # str x24, [sp, #0]
+C9FFFF17  # b trap_exit
+
+:write_file
+    ; x21=fd, x22=buf, x23=count, x24=original count
+    ; Get file info from process fd table
+E00315AA  # mov x0, x21
+FD030094  # bl fd_to_file_index
+F90300AA  # mov x25, x0 # x25 = global file index
+
+    ; Get file_address and file_length from global descriptor
+4910ACD2  # movz x9, #0x6082, lsl #16 # 0x60820000
+2AEF7CD3  # lsl x10, x25, #4 # index * 16
+3A010A8B  # add x26, x9, x10 # x26 = &global_fd[file_index]
+5B0340F9  # ldr x27, [x26, #0] # file_address
+5C0740F9  # ldr x28, [x26, #8] # file_length
+
+    ; Get current_offset from process fd
+68030094  # bl get_process_base
+00000891  # add x0, x0, #0x200
+A9F27DD3  # lsl x9, x21, #3
+1300098B  # add x19, x0, x9 # x19 = &open_files[fd]
+750640B9  # ldr w21, [x19, #4] # current_offset (reuse x21, fd no longer needed)
+
+:write_file_loop
+170200B4  # cbz x23, write_file_done
+
+    ; Copy byte from user buf to file
+C9024039  # ldrb w9, [x22]
+6A03158B  # add x10, x27, x21 # dest = file_address + offset
+49010039  # strb w9, [x10]
+
+D6060091  # add x22, x22, #1
+B5060091  # add x21, x21, #1 # offset++
+F70600D1  # sub x23, x23, #1
+
+    ; If offset > file_length, extend file
+9F0315EB  # cmp x28, x21
+0AFFFF54  # b.ge write_file_loop
+
+    ; Extend: file_length = offset
+FC0315AA  # mov x28, x21
+5C0700F9  # str x28, [x26, #8] # update file_length
+
+    ; Also advance next_file_address
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A0D40F9  # ldr x10, [x9, #0x18]
+4A050091  # add x10, x10, #1
+2A0D00F9  # str x10, [x9, #0x18] # next_file_address++
+
+F1FFFF17  # b write_file_loop
+
+:write_file_done
+    ; Update current_offset in process fd
+750600B9  # str w21, [x19, #4]
+    ; Return original count
+F80300F9  # str x24, [sp, #0]
+A9FFFF17  # b trap_exit
+
+;============================================================
+; syscall_brk: brk(addr) -> addr
+; x0(0)=addr. If addr==0, return current brk.
+;============================================================
+:syscall_brk
+E90340F9  # ldr x9, [sp, #0] # requested addr (VA, or 0)
+
+    ; Global data at 0x40300000
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B2140F9  # ldr x11, [x10, #0x40] # current brk (PA)
+
+E90100B4  # cbz x9, brk_return_current
+
+    ; Convert VA to PA: PA = VA + 0x40000000
+0C00A8D2  # movz x12, #0x4000, lsl #16
+29010C8B  # add x9, x9, x12 # PA = new brk
+
+    ; Zero memory from old brk to new brk if extending
+7F0109EB  # cmp x11, x9
+EA000054  # b.ge brk_store
+ED030BAA  # mov x13, x11 # x13 = cursor = old brk (PA)
+:brk_zero_loop
+BF0109EB  # cmp x13, x9
+8A000054  # b.ge brk_store
+BF010039  # strb wzr, [x13]
+AD050091  # add x13, x13, #1
+FCFFFF17  # b brk_zero_loop
+
+:brk_store
+492100F9  # str x9, [x10, #0x40] # store new brk (PA)
+    ; Return VA to user
+29010CCB  # sub x9, x9, x12
+E90300F9  # str x9, [sp, #0]
+97FFFF17  # b trap_exit
+
+:brk_return_current
+    ; Return current brk as VA = PA - 0x40000000
+0C00A8D2  # movz x12, #0x4000, lsl #16
+6B010CCB  # sub x11, x11, x12
+EB0300F9  # str x11, [sp, #0]
+93FFFF17  # b trap_exit
+
+;============================================================
+; syscall_read: read(fd, buf, count) -> bytes_read
+; x0(0)=fd, x1(8)=buf, x2(16)=count
+;============================================================
+:syscall_read
+F50340F9  # ldr x21, [sp, #0] # fd
+F60740F9  # ldr x22, [sp, #8] # buf (VA)
+F70B40F9  # ldr x23, [sp, #16] # count
+F80317AA  # mov x24, x23 # save original count
+
+    ; Translate buf VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+D602098B  # add x22, x22, x9
+
+D50300B5  # cbnz x21, read_file # if fd != 0, read from file
+
+    ; Read from stdin (disk)
+:read_stdin_loop
+770300B4  # cbz x23, read_stdin_done
+
+    ; Load global data base
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1940F9  # ldr x10, [x9, #0x30] # stdin_sector
+2B1D40F9  # ldr x11, [x9, #0x38] # stdin_offset
+
+    ; stdin buffer at 0x60010000
+2000ACD2  # movz x0, #0x6001, lsl #16
+
+    ; If offset >= 512, read next sector
+7F0108F1  # cmp x11, #512
+4B010054  # b.lt read_stdin_have_data
+
+    ; Read next sector
+E0030AAA  # mov x0, x10 # sector number
+2100ACD2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
+A6040094  # bl disk_read_sector
+    ; Advance sector, reset offset
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1940F9  # ldr x10, [x9, #0x30]
+4A050091  # add x10, x10, #1
+2A1900F9  # str x10, [x9, #0x30] # stdin_sector++
+3F1D00F9  # str xzr, [x9, #0x38] # stdin_offset = 0
+0B0080D2  # mov x11, #0 # x11 = offset = 0
+
+:read_stdin_have_data
+    ; Read one byte from stdin buffer
+2000ACD2  # movz x0, #0x6001, lsl #16
+00000B8B  # add x0, x0, x11 # buffer + offset
+0C004039  # ldrb w12, [x0] # byte
+
+    ; Store to user buffer
+CC020039  # strb w12, [x22]
+D6060091  # add x22, x22, #1
+F70600D1  # sub x23, x23, #1
+
+    ; Update stdin_offset
+0906A8D2  # movz x9, #0x4030, lsl #16
+2B1D40F9  # ldr x11, [x9, #0x38]
+6B050091  # add x11, x11, #1
+2B1D00F9  # str x11, [x9, #0x38]
+
+E6FFFF17  # b read_stdin_loop
+
+:read_stdin_done
+F80300F9  # str x24, [sp, #0] # return original count
+6FFFFF17  # b trap_exit
+
+:read_file
+    ; x21=fd, x22=buf, x23=count
+    ; Get file info from process fd table
+E00315AA  # mov x0, x21
+A3030094  # bl fd_to_file_index
+F90300AA  # mov x25, x0 # x25 = global file index
+
+    ; Get file_address and file_length from global descriptor
+4910ACD2  # movz x9, #0x6082, lsl #16 # 0x60820000
+2AEF7CD3  # lsl x10, x25, #4
+29010A8B  # add x9, x9, x10
+3A0140F9  # ldr x26, [x9, #0] # file_address
+3B0540F9  # ldr x27, [x9, #8] # file_length
+
+    ; Get current_offset from process fd
+0E030094  # bl get_process_base
+00000891  # add x0, x0, #0x200
+A9F27DD3  # lsl x9, x21, #3
+1C00098B  # add x28, x0, x9 # x28 = &open_files[fd]
+930740B9  # ldr w19, [x28, #4] # current_offset
+
+    ; Read loop
+180080D2  # mov x24, #0 # bytes read
+
+:read_file_loop
+770100B4  # cbz x23, read_file_done
+    ; Check if offset >= length (EOF)
+7F021BEB  # cmp x19, x27
+2A010054  # b.ge read_file_done
+
+    ; Copy one byte
+4903138B  # add x9, x26, x19 # src = file_address + offset
+2A014039  # ldrb w10, [x9]
+CA020039  # strb w10, [x22]
+D6060091  # add x22, x22, #1
+73060091  # add x19, x19, #1
+F70600D1  # sub x23, x23, #1
+18070091  # add x24, x24, #1
+F6FFFF17  # b read_file_loop
+
+:read_file_done
+    ; Update current_offset
+930700B9  # str w19, [x28, #4]
+
+    ; Return bytes read
+F80300F9  # str x24, [sp, #0]
+53FFFF17  # b trap_exit
+
+;============================================================
+; syscall_openat: openat(dirfd, pathname, flags, mode)
+; x0(0)=dirfd(ignored), x1(8)=pathname, x2(16)=flags
+; Returns: fd number or -1
+;============================================================
+:syscall_openat
+F50740F9  # ldr x21, [sp, #8] # pathname (x1, VA)
+F60B40F9  # ldr x22, [sp, #16] # flags (x2)
+
+    ; Translate pathname VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+
+    ; Resolve to absolute path
+E00315AA  # mov x0, x21
+FC020094  # bl absolute_path
+F50300AA  # mov x21, x0 # x21 = absolute path in scratch buffer
+
+    ; Check O_CREAT (bit 6 = 0x40)
+C9027A92  # and x9, x22, #0x40
+E90000B5  # cbnz x9, openat_create
+
+    ; Open existing file
+E00315AA  # mov x0, x21
+62030094  # bl find_file
+1F0000F1  # cmp x0, #0
+EB070054  # b.lt openat_fail
+F70300AA  # mov x23, x0 # x23 = file index
+
+2D000014  # b openat_alloc_fd
+
+:openat_create
+    ; Check parent directory exists
+    ; Find last '/' in path
+E90315AA  # mov x9, x21
+EA0315AA  # mov x10, x21 # x10 = last slash position (default: start)
+:openat_find_slash
+2B014039  # ldrb w11, [x9]
+CB0000B4  # cbz w11, openat_check_parent
+7FBD00F1  # cmp w11, #0x2F
+41000054  # b.ne openat_next_char
+EA0309AA  # mov x10, x9
+:openat_next_char
+29050091  # add x9, x9, #1
+FAFFFF17  # b openat_find_slash
+
+:openat_check_parent
+    ; If slash is first char, parent is root (always exists)
+5F0115EB  # cmp x10, x21
+20010054  # b.eq openat_do_create
+
+    ; Temporarily null-terminate at last slash
+F9030AAA  # mov x25, x10 # save slash position
+38034039  # ldrb w24, [x25]
+3F030039  # strb wzr, [x25]
+E00315AA  # mov x0, x21
+4E030094  # bl find_file
+38030039  # strb w24, [x25] # restore slash
+1F0000F1  # cmp x0, #0
+4B050054  # b.lt openat_fail
+
+:openat_do_create
+    ; Allocate new file entry
+0906A8D2  # movz x9, #0x4030, lsl #16 # globals base
+370940F9  # ldr x23, [x9, #0x10] # x23 = next_filenum (our new file index)
+
+    ; Copy filename to file names table
+    ; dest = 0x60020000 + x23 * 1024
+4A00ACD2  # movz x10, #0x6002, lsl #16
+EBD676D3  # lsl x11, x23, #10
+4A010B8B  # add x10, x10, x11 # destination
+EB0315AA  # mov x11, x21 # source
+:openat_copy_name
+6C014039  # ldrb w12, [x11]
+4C010039  # strb w12, [x10]
+8C0000B4  # cbz w12, openat_name_done
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+FBFFFF17  # b openat_copy_name
+:openat_name_done
+
+    ; Set up global file descriptor
+    ; fd_entry = 0x60820000 + x23 * 16
+4910ACD2  # movz x9, #0x6082, lsl #16
+EAEE7CD3  # lsl x10, x23, #4
+29010A8B  # add x9, x9, x10
+
+    ; file_address = next_file_address (aligned to 8 for ELF compatibility)
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B0D40F9  # ldr x11, [x10, #0x18] # next_file_address
+6B1D0091  # add x11, x11, #7
+6BF17D92  # and x11, x11, #0xFFFFFFFFFFFFFFF8
+4B0D00F9  # str x11, [x10, #0x18] # store aligned next_file_address
+2B0100F9  # str x11, [x9, #0] # store file_address
+3F0500F9  # str xzr, [x9, #8] # file_length = 0
+
+    ; Increment next_filenum
+4B0940F9  # ldr x11, [x10, #0x10]
+6B050091  # add x11, x11, #1
+4B0900F9  # str x11, [x10, #0x10]
+
+:openat_alloc_fd
+    ; Allocate a process fd slot (start from fd 4)
+BF020094  # bl get_process_base
+00000891  # add x0, x0, #0x200 # open_files array
+890080D2  # mov x9, #4 # start fd
+0A3880D2  # mov x10, #448 # max entries
+:openat_find_fd
+3F010AEB  # cmp x9, x10
+6A010054  # b.ge openat_fail
+2BF17DD3  # lsl x11, x9, #3 # fd * 8
+0B000B8B  # add x11, x0, x11
+6C0140B9  # ldr w12, [x11] # global_file_index
+6C0000B4  # cbz w12, openat_got_fd
+29050091  # add x9, x9, #1
+F9FFFF17  # b openat_find_fd
+
+:openat_got_fd
+    ; Store file index and reset offset
+770100B9  # str w23, [x11] # global_file_index
+7F0500B9  # str wzr, [x11, #4] # current_offset = 0
+    ; Return fd
+E90300F9  # str x9, [sp, #0]
+08FFFF17  # b trap_exit
+
+:openat_fail
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+05FFFF17  # b trap_exit
+
+;============================================================
+; syscall_close: close(fd) -> 0
+; x0(0)=fd
+;============================================================
+:syscall_close
+F50340F9  # ldr x21, [sp, #0]
+
+AB020094  # bl get_process_base
+00000891  # add x0, x0, #0x200 # open_files
+A9F27DD3  # lsl x9, x21, #3
+0000098B  # add x0, x0, x9
+1F0000B9  # str wzr, [x0] # clear slot (mark free)
+
+FF0300F9  # str xzr, [sp, #0] # return 0
+FDFEFF17  # b trap_exit
+
+;============================================================
+; syscall_lseek: lseek(fd, offset, whence) -> new_offset
+; x0(0)=fd, x1(8)=offset, x2(16)=whence
+;============================================================
+:syscall_lseek
+F50340F9  # ldr x21, [sp, #0] # fd
+F60740F9  # ldr x22, [sp, #8] # offset
+F70B40F9  # ldr x23, [sp, #16] # whence
+
+A1020094  # bl get_process_base
+00000891  # add x0, x0, #0x200
+A9F27DD3  # lsl x9, x21, #3
+1800098B  # add x24, x0, x9 # x24 = &open_files[fd]
+
+    ; SEEK_SET (whence == 0)
+970000B5  # cbnz x23, lseek_not_set
+160700B9  # str w22, [x24, #4]
+F60300F9  # str x22, [sp, #0]
+F2FEFF17  # b trap_exit
+
+:lseek_not_set
+FF0600F1  # cmp x23, #1
+C1000054  # b.ne lseek_end
+
+    ; SEEK_CUR (whence == 1)
+090740B9  # ldr w9, [x24, #4]
+2901168B  # add x9, x9, x22
+090700B9  # str w9, [x24, #4]
+E90300F9  # str x9, [sp, #0]
+EBFEFF17  # b trap_exit
+
+:lseek_end
+    ; SEEK_END (whence == 2)
+090340B9  # ldr w9, [x24] # global file index
+4A10ACD2  # movz x10, #0x6082, lsl #16 # 0x60820000
+2BED7CD3  # lsl x11, x9, #4
+4A010B8B  # add x10, x10, x11
+490540F9  # ldr x9, [x10, #8] # file_length
+2901168B  # add x9, x9, x22 # length + offset
+090700B9  # str w9, [x24, #4]
+E90300F9  # str x9, [sp, #0]
+E2FEFF17  # b trap_exit
+
+;============================================================
+; syscall_chdir: chdir(path) -> 0 or -1
+; x0(0)=path
+;============================================================
+:syscall_chdir
+F50340F9  # ldr x21, [sp, #0] # path (VA)
+
+    ; Translate VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+
+    ; Resolve to absolute path
+E00315AA  # mov x0, x21
+8C020094  # bl absolute_path
+F50300AA  # mov x21, x0
+
+    ; Find the file
+E00315AA  # mov x0, x21
+F4020094  # bl find_file
+1F0000F1  # cmp x0, #0
+4B030054  # b.lt chdir_fail
+
+    ; Check it's a directory (file_length == 0)
+4910ACD2  # movz x9, #0x6082, lsl #16
+0AEC7CD3  # lsl x10, x0, #4
+29010A8B  # add x9, x9, x10
+2A0540F9  # ldr x10, [x9, #8] # file_length
+AA0200B5  # cbnz x10, chdir_fail # not a directory
+
+    ; Copy path to process current_dir
+7A020094  # bl get_process_base
+16000491  # add x22, x0, #0x100 # dest = proc->current_dir
+
+E90315AA  # mov x9, x21 # source
+EA0316AA  # mov x10, x22 # dest
+0C0080D2  # mov x12, #0 # track last char
+:chdir_copy
+2B014039  # ldrb w11, [x9]
+4B010039  # strb w11, [x10]
+AB0000B4  # cbz w11, chdir_check_slash
+EC030BAA  # mov w12, w11
+29050091  # add x9, x9, #1
+4A050091  # add x10, x10, #1
+FAFFFF17  # b chdir_copy
+
+:chdir_check_slash
+    ; Append trailing '/' if not present
+9FBD00F1  # cmp w12, #0x2F
+A0000054  # b.eq chdir_ok
+EB0580D2  # mov w11, #0x2F
+4B010039  # strb w11, [x10]
+4A050091  # add x10, x10, #1
+5F010039  # strb wzr, [x10]
+:chdir_ok
+FF0300F9  # str xzr, [sp, #0] # return 0
+BFFEFF17  # b trap_exit
+
+:chdir_fail
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+BCFEFF17  # b trap_exit
+
+;============================================================
+; syscall_getcwd: getcwd(buf, size) -> buf or -1
+; x0(0)=buf, x1(8)=size
+;============================================================
+:syscall_getcwd
+F50340F9  # ldr x21, [sp, #0] # buf (VA)
+F60740F9  # ldr x22, [sp, #8] # size
+
+    ; Translate buf VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+
+5F020094  # bl get_process_base
+00000491  # add x0, x0, #0x100 # current_dir
+E90300AA  # mov x9, x0 # src
+EA0315AA  # mov x10, x21 # dest
+
+    ; Check for root "/"
+2B014039  # ldrb w11, [x9]
+7FBD00F1  # cmp w11, #0x2F
+E1000054  # b.ne getcwd_copy
+2B054039  # ldrb w11, [x9, #1]
+AB0000B5  # cbnz w11, getcwd_copy
+    ; Root: copy "/" + null
+EB0580D2  # mov w11, #0x2F
+4B010039  # strb w11, [x10]
+5F050039  # strb wzr, [x10, #1]
+0F000014  # b getcwd_return
+
+:getcwd_copy
+2B014039  # ldrb w11, [x9]
+AB0000B4  # cbz w11, getcwd_strip
+4B010039  # strb w11, [x10]
+29050091  # add x9, x9, #1
+4A050091  # add x10, x10, #1
+FBFFFF17  # b getcwd_copy
+
+:getcwd_strip
+    ; Strip trailing '/'
+4A0500D1  # sub x10, x10, #1
+4B014039  # ldrb w11, [x10]
+7FBD00F1  # cmp w11, #0x2F
+61000054  # b.ne getcwd_no_strip
+5F010039  # strb wzr, [x10]
+03000014  # b getcwd_return
+:getcwd_no_strip
+4A050091  # add x10, x10, #1
+5F010039  # strb wzr, [x10]
+
+:getcwd_return
+    ; Return original VA (x21 is PA, convert back to VA)
+0900A8D2  # movz x9, #0x4000, lsl #16
+A90209CB  # sub x9, x21, x9 # VA = PA - 0x40000000
+E90300F9  # str x9, [sp, #0] # return buf (VA)
+99FEFF17  # b trap_exit
+
+;============================================================
+; syscall_faccessat: faccessat(dirfd, pathname, mode, flags)
+; x0(0)=dirfd(ignored), x1(8)=pathname
+; Returns: 0 if file exists, -1 if not
+;============================================================
+:syscall_faccessat
+F50740F9  # ldr x21, [sp, #8] # pathname (x1, VA)
+
+    ; Translate VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+
+E00315AA  # mov x0, x21
+43020094  # bl absolute_path
+AD020094  # bl find_file
+
+1F0000F1  # cmp x0, #0
+6B000054  # b.lt faccessat_fail
+FF0300F9  # str xzr, [sp, #0] # return 0
+8FFEFF17  # b trap_exit
+:faccessat_fail
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+8CFEFF17  # b trap_exit
+
+;============================================================
+; syscall_mkdirat: mkdirat(dirfd, pathname, mode)
+; x0(0)=dirfd(ignored), x1(8)=pathname
+; Returns: 0 on success, -1 on failure
+;============================================================
+:syscall_mkdirat
+F50740F9  # ldr x21, [sp, #8] # pathname (x1, VA)
+
+    ; Translate VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+
+    ; Resolve to absolute path
+E00315AA  # mov x0, x21
+36020094  # bl absolute_path
+F50300AA  # mov x21, x0
+
+    ; Check parent directory exists (find last '/')
+E90315AA  # mov x9, x21
+EA0315AA  # mov x10, x21 # default last slash = start
+:mkdirat_find_slash
+2B014039  # ldrb w11, [x9]
+CB0000B4  # cbz w11, mkdirat_check_parent
+7FBD00F1  # cmp w11, #0x2F
+41000054  # b.ne mkdirat_next_char
+EA0309AA  # mov x10, x9
+:mkdirat_next_char
+29050091  # add x9, x9, #1
+FAFFFF17  # b mkdirat_find_slash
+
+:mkdirat_check_parent
+5F0115EB  # cmp x10, x21
+20010054  # b.eq mkdirat_do_create # root parent always exists
+
+F9030AAA  # mov x25, x10 # save slash position
+38034039  # ldrb w24, [x25]
+3F030039  # strb wzr, [x25]
+E00315AA  # mov x0, x21
+90020094  # bl find_file
+38030039  # strb w24, [x25] # restore slash
+1F0000F1  # cmp x0, #0
+8B030054  # b.lt mkdirat_fail
+
+:mkdirat_do_create
+    ; Allocate new file entry
+0906A8D2  # movz x9, #0x4030, lsl #16
+370940F9  # ldr x23, [x9, #0x10] # next_filenum
+
+    ; Copy name to file names table
+4A00ACD2  # movz x10, #0x6002, lsl #16 # 0x60020000
+EBD676D3  # lsl x11, x23, #10
+4A010B8B  # add x10, x10, x11
+EB0315AA  # mov x11, x21
+:mkdirat_copy_name
+6C014039  # ldrb w12, [x11]
+4C010039  # strb w12, [x10]
+8C0000B4  # cbz w12, mkdirat_name_done
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+FBFFFF17  # b mkdirat_copy_name
+:mkdirat_name_done
+
+    ; Set up global file descriptor (length = 0 = directory)
+4910ACD2  # movz x9, #0x6082, lsl #16
+EAEE7CD3  # lsl x10, x23, #4
+29010A8B  # add x9, x9, x10
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B0D40F9  # ldr x11, [x10, #0x18] # next_file_address
+6B1D0091  # add x11, x11, #7
+6BF17D92  # and x11, x11, #0xFFFFFFFFFFFFFFF8
+4B0D00F9  # str x11, [x10, #0x18] # store aligned next_file_address
+2B0100F9  # str x11, [x9, #0] # file_address
+3F0500F9  # str xzr, [x9, #8] # file_length = 0
+
+    ; Increment next_filenum
+4B0940F9  # ldr x11, [x10, #0x10]
+6B050091  # add x11, x11, #1
+4B0900F9  # str x11, [x10, #0x10]
+
+FF0300F9  # str xzr, [sp, #0] # return 0
+58FEFF17  # b trap_exit
+
+:mkdirat_fail
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+55FEFF17  # b trap_exit
+
+;============================================================
+; syscall_stub_zero: Return 0 for unimplemented stubs
+;============================================================
+:syscall_stub_zero
+FF0300F9  # str xzr, [sp, #0]
+53FEFF17  # b trap_exit
+
+;============================================================
+; syscall_clone: clone/fork simulation
+; Saves parent state, returns 0 (as child). Parent resumes
+; when child calls exit, returning 1.
+;============================================================
+:syscall_clone
+    ; Get current process descriptor
+FA010094  # bl get_process_base
+F50300AA  # mov x21, x0 # x21 = proc base
+
+    ; Save brk to saved_brk (+0x28)
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A2140F9  # ldr x10, [x9, #0x40] # current brk (PA)
+AA1600F9  # str x10, [x21, #0x28] # saved_brk
+
+    ; Save kernel sp to saved_stack_pointer_fork (+0x18)
+E9030091  # mov x9, sp
+A90E00F9  # str x9, [x21, #0x18]
+
+    ; Set forked flag (+0x20)
+A91240F9  # ldr x9, [x21, #0x20]
+29050091  # add x9, x9, #1
+A91200F9  # str x9, [x21, #0x20]
+
+    ; Save stack: copy from sp to kernel_stack_top (0x68000000)
+0900ADD2  # movz x9, #0x6800, lsl #16 # x9 = 0x68000000 (stack top)
+EA030091  # mov x10, sp # x10 = current sp (can't use sp directly in sub reg)
+2A010ACB  # sub x10, x9, x10 # x10 = stack length
+
+    ; Get save address from next_save_process_address
+0906A8D2  # movz x9, #0x4030, lsl #16
+361540F9  # ldr x22, [x9, #0x28] # next_save_process_address
+B62600F9  # str x22, [x21, #0x48] # save stack save address
+
+0900ADD2  # movz x9, #0x6800, lsl #16
+EA030091  # mov x10, sp
+2A010ACB  # sub x10, x9, x10 # stack length
+AA2A00F9  # str x10, [x21, #0x50] # save stack length
+
+    ; Copy stack to save area
+E00316AA  # mov x0, x22 # dest = save area
+E1030091  # mov x1, sp # src = current sp
+E2030AAA  # mov x2, x10 # len
+96010094  # bl memcpy
+
+    ; Advance next_save_process_address
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1540F9  # ldr x10, [x9, #0x28]
+AB2A40F9  # ldr x11, [x21, #0x50] # stack length
+4A010B8B  # add x10, x10, x11
+2A1500F9  # str x10, [x9, #0x28]
+
+    ; Save process memory: from process_address to brk
+B70240F9  # ldr x23, [x21, #0] # process_address (PA)
+0906A8D2  # movz x9, #0x4030, lsl #16
+382140F9  # ldr x24, [x9, #0x40] # brk (PA)
+0A0317CB  # sub x10, x24, x23 # process memory length
+
+    ; Get save address
+0906A8D2  # movz x9, #0x4030, lsl #16
+391540F9  # ldr x25, [x9, #0x28] # next save addr
+B91E00F9  # str x25, [x21, #0x38] # saved_process_mem_addr
+
+020317CB  # sub x2, x24, x23 # length
+A22200F9  # str x2, [x21, #0x40] # saved_process_mem_len
+
+    ; Copy process memory
+E00319AA  # mov x0, x25 # dest
+E10317AA  # mov x1, x23 # src = process_address (PA)
+85010094  # bl memcpy
+
+    ; Advance next_save_process_address
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1540F9  # ldr x10, [x9, #0x28]
+AB2240F9  # ldr x11, [x21, #0x40] # process mem length
+4A010B8B  # add x10, x10, x11
+2A1500F9  # str x10, [x9, #0x28]
+
+    ; Save user stack: from MIN(SP_EL0, x18) PA to 0x50000000
+    ; M2-Planet uses x18 as data stack pointer which diverges from SP_EL0.
+    ; We must save the entire range that either stack uses.
+    ; Only use x18 if it looks like a valid stack pointer (between brk VA and SP_EL0).
+F77F40F9  # ldr x23, [sp, #248] # SP_EL0 (VA)
+E94B40F9  # ldr x9, [sp, #144] # x18 (VA) - M2-Planet data stack
+3F0117EB  # cmp x9, x23
+A2000054  # b.hs clone_sp_ok # x18 >= SP_EL0, not a lower stack
+0A0CA0D2  # movz x10, #0x0060, lsl #16 # minimum valid VA (0x00600000, user base)
+3F010AEB  # cmp x9, x10
+43000054  # b.lo clone_sp_ok # x18 < 0x00600000, not a valid stack pointer
+F70309AA  # mov x23, x9 # use x18 (it's a valid lower stack pointer)
+:clone_sp_ok
+0900A8D2  # movz x9, #0x4000, lsl #16
+F702098B  # add x23, x23, x9 # user sp (PA) = VA + 0x40000000
+
+0900AAD2  # movz x9, #0x5000, lsl #16 # x9 = 0x50000000 (user stack top PA)
+380117CB  # sub x24, x9, x23 # user stack length
+
+    ; Get save address
+0906A8D2  # movz x9, #0x4030, lsl #16
+391540F9  # ldr x25, [x9, #0x28] # next save addr
+B92E00F9  # str x25, [x21, #0x58] # saved_user_stack_addr
+B83200F9  # str x24, [x21, #0x60] # saved_user_stack_len
+
+    ; Copy user stack to save area
+E00319AA  # mov x0, x25 # dest
+E10317AA  # mov x1, x23 # src = user sp (PA)
+E20318AA  # mov x2, x24 # len
+6C010094  # bl memcpy
+
+    ; Advance next_save_process_address
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1540F9  # ldr x10, [x9, #0x28]
+4A01188B  # add x10, x10, x24
+2A1500F9  # str x10, [x9, #0x28]
+
+    ; Return 0 (child return from fork)
+FF0300F9  # str xzr, [sp, #0]
+0BFEFF17  # b trap_exit
+
+;============================================================
+; syscall_execve: execve(pathname, argv, envp)
+; x0(0)=pathname, x1(8)=argv, x2(16)=envp
+;============================================================
+:syscall_execve
+F50340F9  # ldr x21, [sp, #0] # pathname (VA)
+F60740F9  # ldr x22, [sp, #8] # argv (VA)
+F70B40F9  # ldr x23, [sp, #16] # envp (VA)
+
+    ; Translate all pointers VA -> PA
+0900A8D2  # movz x9, #0x4000, lsl #16
+B502098B  # add x21, x21, x9
+D602098B  # add x22, x22, x9
+F702098B  # add x23, x23, x9
+
+    ; Check if current process forked
+AB010094  # bl get_process_base
+F80300AA  # mov x24, x0 # current proc
+091340F9  # ldr x9, [x24, #0x20] # forked flag
+690100B5  # cbnz x9, execve_forked
+
+    ; Not forked: check if first process
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20] # next_process_num
+5F0500F1  # cmp x10, #1
+41010054  # b.ne execve_overlay
+
+    ; First process: save original sp at proc[1]+0x10
+0908ACD2  # movz x9, #0x6040, lsl #16 # 0x40400000
+0A0082D2  # movz x10, #0x1000
+29010A8B  # add x9, x9, x10 # proc[1] = 0x60401000
+EA030091  # mov x10, sp
+2A0900F9  # str x10, [x9, #0x10] # save kernel sp for return-to-shell
+05000014  # b execve_prepare_stack
+
+:execve_forked
+    ; Forked: create new process after fork
+290500D1  # sub x9, x9, #1
+091300F9  # str x9, [x24, #0x20]
+02000014  # b execve_prepare_stack
+
+:execve_overlay
+    ; Not forked, not first: overlay current process
+01000014  # b execve_prepare_stack
+
+:execve_prepare_stack
+    ; Set up user stack at PA 0x50000000 (VA 0x10000000)
+
+    ; First, count argc
+E90316AA  # mov x9, x22 # argv
+190080D2  # mov x25, #0 # argc
+    ; VA range limit: 0x40000000 (1GB)
+0B00A8D2  # movz x11, #0x4000, lsl #16
+:execve_count_args
+2A0140F9  # ldr x10, [x9]
+CA0000B4  # cbz x10, execve_counted
+5F010BEB  # cmp x10, x11
+82000054  # b.hs execve_counted # pointer out of valid VA range
+39070091  # add x25, x25, #1
+29210091  # add x9, x9, #8
+FAFFFF17  # b execve_count_args
+:execve_counted
+
+    ; String storage on user stack, growing DOWN from PA 0x50000000.
+1B00AAD2  # movz x27, #0x5000, lsl #16 # x27 = 0x50000000 (string storage PA)
+
+    ; ---- Phase 1: Copy argv strings ----
+    ; Temp argv VA array at PA 0x60001000
+1C00ACD2  # movz x28, #0x6000, lsl #16
+090082D2  # movz x9, #0x1000
+9C03098B  # add x28, x28, x9 # x28 = 0x60001000 (temp VA array)
+
+F30316AA  # mov x19, x22 # x19 = argv array iterator (PA)
+F80319AA  # mov x24, x25 # x24 = argc (from count loop)
+190080D2  # mov x25, #0 # copy counter
+:execve_copy_argv
+3F0318EB  # cmp x25, x24
+2A020054  # b.ge execve_argv_done
+6A0240F9  # ldr x10, [x19] # argv[i] pointer (VA)
+EA0100B4  # cbz x10, execve_argv_done
+
+    ; Translate argv[i] VA -> PA
+0B00A8D2  # movz x11, #0x4000, lsl #16
+41010B8B  # add x1, x10, x11 # src (PA)
+
+    ; Allocate string slot on user stack (grow down)
+7B0304D1  # sub x27, x27, #256
+    ; Copy string from x1 to x27 (256 bytes max)
+E0031BAA  # mov x0, x27 # dest (PA)
+022080D2  # mov x2, #256
+32010094  # bl memcpy
+
+    ; Calculate VA for this string: VA = PA - 0x40000000
+0A00A8D2  # movz x10, #0x4000, lsl #16
+6A030ACB  # sub x10, x27, x10 # VA
+
+    ; Store VA in temp array
+2BF37DD3  # lsl x11, x25, #3
+8B030B8B  # add x11, x28, x11
+6A0100F9  # str x10, [x11]
+
+39070091  # add x25, x25, #1
+73220091  # add x19, x19, #8
+EFFFFF17  # b execve_copy_argv
+
+:execve_argv_done
+F80319AA  # mov x24, x25 # x24 = argc (final)
+
+    ; ---- Phase 2: Copy envp strings ----
+    ; Temp envp VA array at PA 0x60002000
+1C00ACD2  # movz x28, #0x6000, lsl #16
+090084D2  # movz x9, #0x2000
+9C03098B  # add x28, x28, x9 # x28 = 0x60002000
+
+F30317AA  # mov x19, x23 # x19 = envp array iterator (PA)
+190080D2  # mov x25, #0 # envc counter
+:execve_copy_envp
+6A0240F9  # ldr x10, [x19] # envp[i] pointer (VA)
+4A0200B4  # cbz x10, execve_envp_done
+0B00A8D2  # movz x11, #0x4000, lsl #16
+5F010BEB  # cmp x10, x11
+E2010054  # b.hs execve_envp_done # out of valid VA range
+
+    ; Translate VA -> PA
+0B00A8D2  # movz x11, #0x4000, lsl #16
+41010B8B  # add x1, x10, x11 # src (PA)
+
+    ; Allocate string slot on user stack (grow down)
+7B0304D1  # sub x27, x27, #256
+E0031BAA  # mov x0, x27 # dest (PA)
+022080D2  # mov x2, #256
+19010094  # bl memcpy
+
+0A00A8D2  # movz x10, #0x4000, lsl #16
+6A030ACB  # sub x10, x27, x10 # VA
+
+2BF37DD3  # lsl x11, x25, #3
+8B030B8B  # add x11, x28, x11
+6A0100F9  # str x10, [x11]
+
+39070091  # add x25, x25, #1
+73220091  # add x19, x19, #8
+EEFFFF17  # b execve_copy_envp
+
+:execve_envp_done
+    ; x24 = argc, x25 = envc
+    ; Save envc to stack for later
+FF4300D1  # sub sp, sp, #16
+F90300F9  # str x25, [sp] # save envc
+
+    ; ---- Phase 3: Build stack ----
+FA031BAA  # mov x26, x27
+
+    ; Push NULL (envp terminator)
+5A2300D1  # sub x26, x26, #8
+5F0300F9  # str xzr, [x26]
+
+    ; Push envp pointers in reverse order
+E90340F9  # ldr x9, [sp] # x9 = envc
+0C00ACD2  # movz x12, #0x6000, lsl #16
+0D0084D2  # movz x13, #0x2000
+8C010D8B  # add x12, x12, x13 # x12 = 0x60002000 (envp VA array)
+:execve_push_envp
+090100B4  # cbz x9, execve_push_envp_done
+290500D1  # sub x9, x9, #1
+2AF17DD3  # lsl x10, x9, #3
+8A010A8B  # add x10, x12, x10
+4A0140F9  # ldr x10, [x10] # VA
+5A2300D1  # sub x26, x26, #8
+4A0300F9  # str x10, [x26]
+F9FFFF17  # b execve_push_envp
+:execve_push_envp_done
+FF430091  # add sp, sp, #16 # pop saved envc
+
+    ; Push NULL (argv terminator)
+5A2300D1  # sub x26, x26, #8
+5F0300F9  # str xzr, [x26]
+
+    ; Push argv pointers in reverse order
+E90318AA  # mov x9, x24 # x9 = argc
+0C00ACD2  # movz x12, #0x6000, lsl #16
+0D0082D2  # movz x13, #0x1000
+8C010D8B  # add x12, x12, x13 # x12 = 0x60001000 (argv VA array)
+:execve_push_argv
+090100B4  # cbz x9, execve_push_argc
+290500D1  # sub x9, x9, #1
+2AF17DD3  # lsl x10, x9, #3
+8A010A8B  # add x10, x12, x10
+4A0140F9  # ldr x10, [x10] # VA
+5A2300D1  # sub x26, x26, #8
+4A0300F9  # str x10, [x26]
+F9FFFF17  # b execve_push_argv
+
+:execve_push_argc
+    ; Push argc
+5A2300D1  # sub x26, x26, #8
+580300F9  # str x24, [x26] # x24 = argc
+
+    ; Now x26 = user stack PA. Calculate VA = x26 - 0x40000000
+0900A8D2  # movz x9, #0x4000, lsl #16
+5A0309CB  # sub x26, x26, x9 # x26 = user stack VA
+
+    ; --- Load ELF ---
+    ; Resolve program name
+E00315AA  # mov x0, x21 # pathname
+3F010094  # bl absolute_path
+F50300AA  # mov x21, x0
+E00315AA  # mov x0, x21
+A7010094  # bl find_file
+1F0000F1  # cmp x0, #0
+8B090054  # b.lt execve_fail
+FB0300AA  # mov x27, x0 # x27 = file index
+
+    ; Get file address and length
+4910ACD2  # movz x9, #0x6082, lsl #16 # 0x60820000
+6AEF7CD3  # lsl x10, x27, #4
+29010A8B  # add x9, x9, x10
+3C0140F9  # ldr x28, [x9, #0] # file_address (PA)
+330540F9  # ldr x19, [x9, #8] # file_length
+
+    ; Increment next_process_num
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20]
+4A050091  # add x10, x10, #1
+2A1100F9  # str x10, [x9, #0x20]
+
+    ; Get new process descriptor
+28010094  # bl get_process_base
+F80300AA  # mov x24, x0 # x24 = new proc descriptor
+
+    ; Copy cwd from previous process
+090082D2  # movz x9, #0x1000
+090309CB  # sub x9, x24, x9 # prev proc
+2A010491  # add x10, x9, #0x100 # prev cwd
+0B030491  # add x11, x24, #0x100 # new cwd
+0C2080D2  # mov x12, #256
+:execve_copy_cwd
+EC0000B4  # cbz x12, execve_cwd_done
+4D014039  # ldrb w13, [x10]
+6D010039  # strb w13, [x11]
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+8C0500D1  # sub x12, x12, #1
+FAFFFF17  # b execve_copy_cwd
+:execve_cwd_done
+
+    ; Clear new process open file descriptors
+00030891  # add x0, x24, #0x200
+01C081D2  # movz x1, #0xE00
+C5000094  # bl memset_zero
+
+    ; Parse 64-bit ELF header
+950F40F9  # ldr x21, [x28, #0x18] # entry point (VA)
+
+891340F9  # ldr x9, [x28, #0x20] # e_phoff
+9603098B  # add x22, x28, x9 # x22 = phdr address (PA)
+
+97734079  # ldrh w23, [x28, #0x38] # e_phnum
+
+    ; Zero user process area: 2MB starting at PA 0x40600000
+000CA8D2  # movz x0, #0x4060, lsl #16
+0104A0D2  # movz x1, #0x20, lsl #16 # 0x200000 = 2MB
+BE000094  # bl memset_zero
+
+    ; Reset brk to process base
+090CA8D2  # movz x9, #0x4060, lsl #16
+0A06A8D2  # movz x10, #0x4030, lsl #16
+492100F9  # str x9, [x10, #0x40] # brk = 0x40600000
+
+    ; Load each program header (56 bytes each for ELF64)
+:execve_load_phdr
+570300B4  # cbz x23, execve_load_done
+
+    ; Check p_type == PT_LOAD (1)
+C90240B9  # ldr w9, [x22]
+3F0500F1  # cmp w9, #1
+81020054  # b.ne execve_next_phdr
+
+C90640F9  # ldr x9, [x22, #0x08] # p_offset
+8103098B  # add x1, x28, x9 # src = file_address + p_offset
+
+C90A40F9  # ldr x9, [x22, #0x10] # p_vaddr (VA)
+0A00A8D2  # movz x10, #0x4000, lsl #16
+20010A8B  # add x0, x9, x10 # dest = PA = VA + 0x40000000
+
+C21240F9  # ldr x2, [x22, #0x20] # p_filesz
+B6000094  # bl memcpy
+
+    ; Track end of loaded segments for brk
+C90A40F9  # ldr x9, [x22, #0x10] # p_vaddr
+CA1240F9  # ldr x10, [x22, #0x20] # p_filesz
+29010A8B  # add x9, x9, x10 # end of segment (VA)
+0A00A8D2  # movz x10, #0x4000, lsl #16
+29010A8B  # add x9, x9, x10 # end (PA)
+0A0084D2  # movz x10, #0x2000
+29010A8B  # add x9, x9, x10 # +0x2000 padding
+
+    ; Set brk = max across segments
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B2140F9  # ldr x11, [x10, #0x40]
+7F0109EB  # cmp x11, x9
+4A000054  # b.ge execve_next_phdr
+492100F9  # str x9, [x10, #0x40]
+
+:execve_next_phdr
+D6E20091  # add x22, x22, #56
+F70600D1  # sub x23, x23, #1
+E7FFFF17  # b execve_load_phdr
+
+:execve_load_done
+    ; Set process_address in descriptor
+090CA8D2  # movz x9, #0x4060, lsl #16 # PA 0x40600000
+090300F9  # str x9, [x24, #0]
+
+    ; Clear forked flag
+1F1300F9  # str xzr, [x24, #0x20]
+
+    ; Deallocate trap frame
+FF430491  # add sp, sp, #272
+
+    ; Ensure new code is visible (I-cache coherence)
+1F7508D5  # ic iallu
+9F3F03D5  # dsb sy
+DF3F03D5  # isb
+
+    ; Set ELR_EL1 = entry point VA
+354018D5  # msr elr_el1, x21
+
+    ; Set SPSR_EL1 = 0 (EL0, AArch64, interrupts unmasked)
+090080D2  # movz x9, #0
+094018D5  # msr spsr_el1, x9
+
+    ; Set user SP and eret
+1A4118D5  # msr sp_el0, x26
+E0039FD6  # eret
+
+:execve_fail
+09008092  # movn x9, #0
+E90300F9  # str x9, [sp, #0]
+3DFDFF17  # b trap_exit
+
+;============================================================
+; syscall_exit: exit(code)
+; x0(0)=exit code
+;============================================================
+:syscall_exit
+F50340F9  # ldr x21, [sp, #0] # exit code
+
+    ; Decrement next_process_num
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20]
+4A0500D1  # sub x10, x10, #1
+2A1100F9  # str x10, [x9, #0x20] # next_process_num--
+
+    ; If returning to shell (next_process_num == 1)
+5F0500F1  # cmp x10, #1
+00040054  # b.eq exit_to_shell
+
+    ; Returning to parent after fork
+4B0500D1  # sub x11, x10, #1 # parent index
+6BCD74D3  # lsl x11, x11, #12 # * 4096
+0C08ACD2  # movz x12, #0x6040, lsl #16 # 0x40400000
+96010B8B  # add x22, x12, x11 # x22 = parent proc descriptor
+
+    ; Save child exit code
+D51A00F9  # str x21, [x22, #0x30]
+
+    ; Restore parent process memory
+C00240F9  # ldr x0, [x22, #0] # dest = process_address (PA)
+C11E40F9  # ldr x1, [x22, #0x38] # src = saved_process_mem_addr
+C22240F9  # ldr x2, [x22, #0x40] # len = saved_process_mem_len
+88000094  # bl memcpy
+
+    ; Deallocate save area
+0906A8D2  # movz x9, #0x4030, lsl #16
+CA2640F9  # ldr x10, [x22, #0x48] # saved stack addr
+2A1500F9  # str x10, [x9, #0x28] # next_save_process_address
+
+    ; Restore parent brk
+CA1640F9  # ldr x10, [x22, #0x28] # saved_brk
+2A2100F9  # str x10, [x9, #0x40] # current_brk
+
+    ; Restore parent stack pointer
+C90E40F9  # ldr x9, [x22, #0x18] # saved_stack_pointer_fork
+3F010091  # mov sp, x9
+
+    ; Restore parent stack contents
+C12640F9  # ldr x1, [x22, #0x48] # src = saved stack addr
+E0030091  # mov x0, sp # dest = sp
+C22A40F9  # ldr x2, [x22, #0x50] # len = saved stack len
+7D000094  # bl memcpy
+
+    ; Restore parent user stack
+    ; Compute dest from saved length: dest = 0x50000000 - saved_user_stack_len
+0000AAD2  # movz x0, #0x5000, lsl #16 # user stack top PA
+C23240F9  # ldr x2, [x22, #0x60] # len = saved_user_stack_len
+000002CB  # sub x0, x0, x2 # dest = stack top - len (= original save start)
+C12E40F9  # ldr x1, [x22, #0x58] # src = saved_user_stack_addr
+78000094  # bl memcpy
+
+    ; Flush I-cache after restoring parent code/data
+1F7508D5  # ic iallu
+9F3F03D5  # dsb sy
+DF3F03D5  # isb
+
+    ; Return 1 (parent return from fork)
+290080D2  # mov x9, #1
+E90300F9  # str x9, [sp, #0] # x0 = 1 in trap frame
+17FDFF17  # b trap_exit
+
+:exit_to_shell
+    ; Restore kernel sp from proc[1]+0x10
+0908ACD2  # movz x9, #0x6040, lsl #16
+0A0082D2  # movz x10, #0x1000
+29010A8B  # add x9, x9, x10 # proc[1] = 0x60401000
+290940F9  # ldr x9, [x9, #0x10]
+3F010091  # mov sp, x9
+
+    ; Jump to shell_return
+F6040014  # b shell_return
+
+;============================================================
+; syscall_waitid: waitid(idtype, id, infop, options, ...)
+;============================================================
+:syscall_waitid
+B8000094  # bl get_process_base
+091840F9  # ldr x9, [x0, #0x30] # child_exit_code
+
+    ; a2 = infop (VA)
+EA0B40F9  # ldr x10, [sp, #16] # x2 = infop
+AA0000B4  # cbz x10, waitid_no_write
+
+    ; Translate infop VA -> PA
+0B00A8D2  # movz x11, #0x4000, lsl #16
+4A010B8B  # add x10, x10, x11
+
+    ; Write exit code shifted left by 8
+29DD78D3  # lsl x9, x9, #8
+490100B9  # str w9, [x10]
+
+:waitid_no_write
+FF0300F9  # str xzr, [sp, #0] # return 0
+07FDFF17  # b trap_exit
+
+;============================================================
+; syscall_wait4: wait4(pid, wstatus, options, rusage)
+; x0(0)=pid, x1(8)=wstatus_ptr
+;============================================================
+:syscall_wait4
+AE000094  # bl get_process_base
+091840F9  # ldr x9, [x0, #0x30] # child_exit_code
+
+    ; Get wstatus pointer (x1)
+EA0740F9  # ldr x10, [sp, #8] # x1 = wstatus (VA)
+AA0000B4  # cbz x10, wait4_no_write
+
+    ; Translate VA -> PA
+0B00A8D2  # movz x11, #0x4000, lsl #16
+4A010B8B  # add x10, x10, x11
+
+    ; Write wstatus = (exit_code << 8)
+29DD78D3  # lsl x9, x9, #8
+490100B9  # str w9, [x10]
+
+:wait4_no_write
+    ; Return child pid (1)
+290080D2  # mov x9, #1
+E90300F9  # str x9, [sp, #0]
+FCFCFF17  # b trap_exit
+
+;============================================================
+; uart_putchar: Print character in x0 via PL011 UART
+; x0 = character to print
+;============================================================
+:uart_putchar
+0920B9D2  # movz x9, #0xC900, lsl #16 # VA 0xC9000000 -> PA 0x09000000 via Entry 3
+:uart_wait
+2A1940B9  # ldr w10, [x9, #0x18] # FR register (flags)
+4A017B92  # and w10, w10, #0x20 # bit 5 = TXFF (TX FIFO full)
+CAFFFFB5  # cbnz w10, uart_wait
+20010039  # strb w0, [x9] # write to DR
+C0035FD6  # ret
+
+;============================================================
+; print_hex_nibble: Print nibble (0-15) in x0
+;============================================================
+:print_hex_nibble
+1F2800F1  # cmp x0, #10
+6A000054  # b.ge print_hex_alpha
+00C00091  # add x0, x0, #0x30
+F7FFFF17  # b uart_putchar
+:print_hex_alpha
+005C0191  # add x0, x0, #0x57
+F5FFFF17  # b uart_putchar
+
+;============================================================
+; print_hex_byte: Print byte in x0 as 2 hex digits
+;============================================================
+:print_hex_byte
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F30300AA  # mov x19, x0
+60FE44D3  # lsr x0, x19, #4
+000C4092  # and x0, x0, #0xF
+F4FFFF97  # bl print_hex_nibble
+E00313AA  # mov x0, x19
+000C4092  # and x0, x0, #0xF
+F1FFFF97  # bl print_hex_nibble
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; print_hex32: Print 32-bit value in x0 as 8 hex digits
+;============================================================
+:print_hex32
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F30300AA  # mov x19, x0
+
+60FE5CD3  # lsr x0, x19, #28
+000C4092  # and x0, x0, #0xF
+E6FFFF97  # bl print_hex_nibble
+60FE58D3  # lsr x0, x19, #24
+000C4092  # and x0, x0, #0xF
+E3FFFF97  # bl print_hex_nibble
+60FE54D3  # lsr x0, x19, #20
+000C4092  # and x0, x0, #0xF
+E0FFFF97  # bl print_hex_nibble
+60FE50D3  # lsr x0, x19, #16
+000C4092  # and x0, x0, #0xF
+DDFFFF97  # bl print_hex_nibble
+60FE4CD3  # lsr x0, x19, #12
+000C4092  # and x0, x0, #0xF
+DAFFFF97  # bl print_hex_nibble
+60FE48D3  # lsr x0, x19, #8
+000C4092  # and x0, x0, #0xF
+D7FFFF97  # bl print_hex_nibble
+60FE44D3  # lsr x0, x19, #4
+000C4092  # and x0, x0, #0xF
+D4FFFF97  # bl print_hex_nibble
+E00313AA  # mov x0, x19
+000C4092  # and x0, x0, #0xF
+D1FFFF97  # bl print_hex_nibble
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; print_string: Print null-terminated string at x0
+;============================================================
+:print_string
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F30300AA  # mov x19, x0
+:print_string_loop
+60024039  # ldrb w0, [x19]
+800000B4  # cbz w0, print_string_done
+C0FFFF97  # bl uart_putchar
+73060091  # add x19, x19, #1
+FCFFFF17  # b print_string_loop
+:print_string_done
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; load_ram_base: Load 0x40210000 into x20
+;============================================================
+:load_ram_base
+3404A8D2  # movz x20, #0x4021, lsl #16
+C0035FD6  # ret
+
+;============================================================
+; load_data_base: Load 0x40300000 into x9
+;============================================================
+:load_data_base
+0906A8D2  # movz x9, #0x4030, lsl #16
+C0035FD6  # ret
+
+;============================================================
+; reboot: PSCI SYSTEM_RESET via HVC
+;============================================================
+:reboot
+200180D2  # movz x0, #0x0009
+0080B0F2  # movk x0, #0x8400, lsl #16 # 0x84000009 = PSCI SYSTEM_RESET
+020000D4  # hvc #0
+:reboot_hang
+5F2003D5  # wfe
+FFFFFF17  # b reboot_hang
+
+;============================================================
+; memset_zero: Zero memory from x0 to x0+x1
+; x0 = start address, x1 = byte count (must be multiple of 8)
+;============================================================
+:memset_zero
+A10000B4  # cbz x1, memset_done
+1F0000F9  # str xzr, [x0]
+00200091  # add x0, x0, #8
+212000D1  # sub x1, x1, #8
+FCFFFF17  # b memset_zero
+:memset_done
+C0035FD6  # ret
+
+;============================================================
+; memcpy: Copy memory
+; x0 = dest, x1 = src, x2 = byte count
+; Returns: x0 = dest (preserved)
+;============================================================
+:memcpy
+E90300AA  # mov x9, x0 # save dest for return
+:memcpy_loop
+E20000B4  # cbz x2, memcpy_done
+2A004039  # ldrb w10, [x1]
+0A000039  # strb w10, [x0]
+00040091  # add x0, x0, #1
+21040091  # add x1, x1, #1
+420400D1  # sub x2, x2, #1
+FAFFFF17  # b memcpy_loop
+:memcpy_done
+E00309AA  # mov x0, x9
+C0035FD6  # ret
+
+;============================================================
+; bswap32: Byte-swap a 32-bit value
+; x0 = input, Returns: x0 = byte-swapped
+;============================================================
+:bswap32
+0008C05A  # rev w0, w0
+C0035FD6  # ret
+
+;============================================================
+; read_stdin_byte: Read one byte from stdin (disk)
+; Returns: x0 = byte read
+;============================================================
+:read_stdin_byte
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+
+    ; Load global data base
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1D40F9  # ldr x10, [x9, #0x38] # stdin_offset
+
+    ; If offset >= 512, read next sector
+5F0108F1  # cmp x10, #512
+4B010054  # b.lt rsb_have_data
+
+    ; Read next sector into stdin buffer at 0x60010000
+201940F9  # ldr x0, [x9, #0x30] # sector number
+2100ACD2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
+B4010094  # bl disk_read_sector
+
+    ; Advance sector, reset offset
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1940F9  # ldr x10, [x9, #0x30]
+4A050091  # add x10, x10, #1
+2A1900F9  # str x10, [x9, #0x30] # stdin_sector++
+3F1D00F9  # str xzr, [x9, #0x38] # stdin_offset = 0
+0A0080D2  # mov x10, #0
+
+:rsb_have_data
+    ; Read one byte from stdin buffer
+3300ACD2  # movz x19, #0x6001, lsl #16
+73020A8B  # add x19, x19, x10
+60024039  # ldrb w0, [x19]
+
+    ; Update stdin_offset
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1D40F9  # ldr x10, [x9, #0x38]
+4A050091  # add x10, x10, #1
+2A1D00F9  # str x10, [x9, #0x38]
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; setup_page_table: Create AArch64 page table at PA 0x40100000
+; Entry 0: VA 0x00000000-0x3FFFFFFF -> PA 0x40000000 (User, Normal)
+; Entry 1: VA 0x40000000-0x7FFFFFFF -> PA 0x40000000 (Kernel, Normal)
+; Entry 2: VA 0x80000000-0xBFFFFFFF -> PA 0x80000000 (Kernel, Normal, upper RAM)
+; Entry 3: VA 0xC0000000-0xFFFFFFFF -> PA 0x00000000 (Device nGnRE, MMIO)
+; Also sets MAIR_EL1, TCR_EL1, TTBR0_EL1
+;============================================================
+:setup_page_table
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+
+    ; Zero page table (4KB at 0x40100000)
+0002A8D2  # movz x0, #0x4010, lsl #16
+010082D2  # movz x1, #0x1000
+CFFFFF97  # bl memset_zero
+
+    ; MAIR_EL1: attr0=0xFF (Normal WB), attr1=0x04 (Device nGnRE)
+E09F80D2  # movz x0, #0x04FF
+00A218D5  # msr mair_el1, x0
+
+    ; TCR_EL1: T0SZ=25 (39-bit VA), IRGN0=1, ORGN0=1, SH0=3, TG0=0 (4KB)
+    ; = 25 | (1<<8) | (1<<10) | (3<<12) = 0x3519
+20A386D2  # movz x0, #0x3519
+402018D5  # msr tcr_el1, x0
+
+    ; TTBR0_EL1 = page table physical address
+0002A8D2  # movz x0, #0x4010, lsl #16
+002018D5  # msr ttbr0_el1, x0
+
+    ; Page table base
+0002A8D2  # movz x0, #0x4010, lsl #16
+
+    ; Entry 0: VA 0x00000000 -> PA 0x40000000
+    ; Block descriptor for level 1 (1GB blocks)
+    ; Attrs: AF(1<<10) | SH(3<<8) | AP_EL0(1<<6) | AttrIdx(0)<<2 | 0b01 (block)
+    ; = 0x40000000 | (1<<10) | (3<<8) | (1<<6) | (0<<2) | 1
+    ; = 0x40000000 | 0x400 | 0x300 | 0x40 | 0x01 = 0x40000741
+0900A8D2  # movz x9, #0x4000, lsl #16
+29E880F2  # movk x9, #0x0741
+090000F9  # str x9, [x0, #0] # entry 0
+
+    ; Entry 1: VA 0x40000000 -> PA 0x40000000
+    ; Kernel mapping: no AP_EL0 bit
+    ; = 0x40000000 | (1<<10) | (3<<8) | (0<<2) | 1
+    ; = 0x40000000 | 0x400 | 0x300 | 0x01 = 0x40000701
+0900A8D2  # movz x9, #0x4000, lsl #16
+29E080F2  # movk x9, #0x0701
+090400F9  # str x9, [x0, #8] # entry 1
+
+    ; Entry 2: VA 0x80000000 -> PA 0x80000000 (kernel RAM, upper 1GB, Normal)
+    ; Identity-map for file data at 0x94000000, saved process mem at 0xB0000000, etc.
+    ; = 0x80000000 | 0x400 | 0x300 | 0x01 = 0x80000701
+0900B0D2  # movz x9, #0x8000, lsl #16
+29E080F2  # movk x9, #0x0701
+090800F9  # str x9, [x0, #16] # entry 2
+
+    ; Entry 3: VA 0xC0000000 -> PA 0x00000000 (device memory for MMIO <0x40000000)
+    ; AttrIdx=1 (device), AF, no user access
+    ; = 0x00000000 | 0x400 | 0x300 | 0x04 | 0x01 = 0x00000705
+A9E080D2  # movz x9, #0x0705
+090C00F9  # str x9, [x0, #24] # entry 3
+
+FE0340F9  # ldr x30, [sp]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; strcmp: Compare two null-terminated strings
+; x0 = str1, x1 = str2
+; Returns: x0 = 0 if equal, nonzero if different
+;============================================================
+:strcmp
+09004039  # ldrb w9, [x0]
+2A004039  # ldrb w10, [x1]
+3F010AEB  # cmp w9, w10
+E1000054  # b.ne strcmp_diff
+890000B4  # cbz w9, strcmp_equal
+00040091  # add x0, x0, #1
+21040091  # add x1, x1, #1
+F9FFFF17  # b strcmp
+:strcmp_equal
+000080D2  # mov x0, #0
+C0035FD6  # ret
+:strcmp_diff
+20010ACB  # sub x0, x9, x10
+C0035FD6  # ret
+
+;============================================================
+; get_process_base: Get base of current process descriptor
+; Returns: x0 = 0x60400000 + (next_process_num - 1) * 0x1000
+;============================================================
+:get_process_base
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20] # next_process_num
+4A0500D1  # sub x10, x10, #1
+4ACD74D3  # lsl x10, x10, #12 # * 4096
+0908ACD2  # movz x9, #0x6040, lsl #16
+20010A8B  # add x0, x9, x10
+C0035FD6  # ret
+
+;============================================================
+; absolute_path: Resolve path to absolute
+; x0 = input path (null-terminated)
+; Returns: x0 = pointer to resolved path in scratch buffer (0x60000000)
+;============================================================
+:absolute_path
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+
+F30300AA  # mov x19, x0 # input path
+    ; Output buffer = scratch at 0x60000000
+1400ACD2  # movz x20, #0x6000, lsl #16 # x20 = output pointer
+F50314AA  # mov x21, x20 # x21 = output start (for return)
+
+    ; Strip leading "./" if present
+69024039  # ldrb w9, [x19]
+3FB900F1  # cmp w9, #0x2E # '.'
+A1000054  # b.ne abs_no_dot
+69064039  # ldrb w9, [x19, #1]
+3FBD00F1  # cmp w9, #0x2F # '/'
+41000054  # b.ne abs_no_dot
+730A0091  # add x19, x19, #2 # skip "./"
+:abs_no_dot
+
+    ; Check if absolute (starts with '/')
+69024039  # ldrb w9, [x19]
+3FBD00F1  # cmp w9, #0x2F
+20010054  # b.eq abs_copy_input
+
+    ; Relative: prepend cwd
+E7FFFF97  # bl get_process_base
+00000491  # add x0, x0, #0x100 # current_dir at +0x100
+:abs_copy_cwd
+09004039  # ldrb w9, [x0]
+A90000B4  # cbz w9, abs_copy_input
+89020039  # strb w9, [x20]
+00040091  # add x0, x0, #1
+94060091  # add x20, x20, #1
+FBFFFF17  # b abs_copy_cwd
+
+:abs_copy_input
+69024039  # ldrb w9, [x19]
+89020039  # strb w9, [x20]
+890000B4  # cbz w9, abs_done
+73060091  # add x19, x19, #1
+94060091  # add x20, x20, #1
+FBFFFF17  # b abs_copy_input
+
+:abs_done
+    ; Normalize: resolve /../ sequences in-place
+F30315AA  # mov x19, x21 # x19 = scan pointer
+:abs_norm_scan
+69024039  # ldrb w9, [x19]
+490800B4  # cbz w9, abs_norm_done
+3FBD00F1  # cmp w9, #0x2F # '/'
+C1070054  # b.ne abs_norm_next
+69064039  # ldrb w9, [x19, #1]
+3FB900F1  # cmp w9, #0x2E # '.'
+61070054  # b.ne abs_norm_next
+690A4039  # ldrb w9, [x19, #2]
+3FB900F1  # cmp w9, #0x2E # '.'
+01070054  # b.ne abs_norm_next
+690E4039  # ldrb w9, [x19, #3]
+3FBD00F1  # cmp w9, #0x2F
+60000054  # b.eq abs_norm_found
+C90300B4  # cbz w9, abs_norm_found_end
+33000014  # b abs_norm_next
+:abs_norm_found
+    ; Found "/../" at x19. Remove preceding dir component.
+EB0313AA  # mov x11, x19 # x11 = start of "/../"
+7F0215EB  # cmp x19, x21
+40020054  # b.eq abs_norm_skip # at root
+730600D1  # sub x19, x19, #1
+:abs_norm_back
+7F0215EB  # cmp x19, x21
+C0000054  # b.eq abs_norm_do_remove
+69024039  # ldrb w9, [x19]
+3FBD00F1  # cmp w9, #0x2F
+60000054  # b.eq abs_norm_do_remove
+730600D1  # sub x19, x19, #1
+FAFFFF17  # b abs_norm_back
+:abs_norm_do_remove
+6C0D0091  # add x12, x11, #3 # source (after "/..")
+:abs_norm_copy
+89014039  # ldrb w9, [x12]
+69020039  # strb w9, [x19]
+890000B4  # cbz w9, abs_norm_restart
+8C050091  # add x12, x12, #1
+73060091  # add x19, x19, #1
+FBFFFF17  # b abs_norm_copy
+:abs_norm_restart
+F30315AA  # mov x19, x21 # restart scan
+DEFFFF17  # b abs_norm_scan
+:abs_norm_skip
+6C0D0091  # add x12, x11, #3 # source after "/.."
+F30315AA  # mov x19, x21 # dest = start
+:abs_norm_skip_copy
+89014039  # ldrb w9, [x12]
+69020039  # strb w9, [x19]
+49FFFFB4  # cbz w9, abs_norm_restart
+8C050091  # add x12, x12, #1
+73060091  # add x19, x19, #1
+FBFFFF17  # b abs_norm_skip_copy
+:abs_norm_found_end
+    ; "/.." at end of string
+EB0313AA  # mov x11, x19
+7F0215EB  # cmp x19, x21
+00020054  # b.eq abs_norm_trunc_root
+730600D1  # sub x19, x19, #1
+:abs_norm_back_end
+7F0215EB  # cmp x19, x21
+C0000054  # b.eq abs_norm_trunc
+69024039  # ldrb w9, [x19]
+3FBD00F1  # cmp w9, #0x2F
+60000054  # b.eq abs_norm_trunc
+730600D1  # sub x19, x19, #1
+FAFFFF17  # b abs_norm_back_end
+:abs_norm_trunc
+7F020039  # strb wzr, [x19]
+    ; If result is empty, make it "/"
+A9024039  # ldrb w9, [x21]
+690100B5  # cbnz w9, abs_norm_done
+E90580D2  # mov w9, #0x2F
+A9020039  # strb w9, [x21]
+BF060039  # strb wzr, [x21, #1]
+07000014  # b abs_norm_done
+:abs_norm_trunc_root
+E90580D2  # mov w9, #0x2F
+A9020039  # strb w9, [x21]
+BF060039  # strb wzr, [x21, #1]
+03000014  # b abs_norm_done
+:abs_norm_next
+73060091  # add x19, x19, #1
+BEFFFF17  # b abs_norm_scan
+:abs_norm_done
+E00315AA  # mov x0, x21 # return output buffer start
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+;============================================================
+; find_file: Search for file by absolute path name
+; x0 = path (absolute, null-terminated)
+; Returns: x0 = file index (>= 3), or -1 if not found
+;============================================================
+:find_file
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+
+F30300AA  # mov x19, x0 # saved path
+
+    ; Load next_filenum
+0906A8D2  # movz x9, #0x4030, lsl #16
+340940F9  # ldr x20, [x9, #0x10] # next_filenum
+940600D1  # sub x20, x20, #1 # start from last file
+
+    ; File names base = 0x60020000
+5500ACD2  # movz x21, #0x6002, lsl #16
+
+:find_file_loop
+9F0E00F1  # cmp x20, #3
+0B010054  # b.lt find_file_not_found
+
+    ; filename address = 0x60020000 + file_index * 1024
+89D676D3  # lsl x9, x20, #10
+A002098B  # add x0, x21, x9
+E10313AA  # mov x1, x19
+73FFFF97  # bl strcmp
+A00000B4  # cbz x0, find_file_found
+
+940600D1  # sub x20, x20, #1
+F8FFFF17  # b find_file_loop
+
+:find_file_not_found
+00008092  # movn x0, #0
+02000014  # b find_file_ret
+
+:find_file_found
+E00314AA  # mov x0, x20
+
+:find_file_ret
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+;============================================================
+; fd_to_file_index: Get global file index from process fd
+; x0 = fd
+; Returns: x0 = global file index
+;============================================================
+:fd_to_file_index
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F30300AA  # mov x19, x0
+
+6EFFFF97  # bl get_process_base
+00000891  # add x0, x0, #0x200 # open_files at +0x200
+69F27DD3  # lsl x9, x19, #3 # fd * 8
+0000098B  # add x0, x0, x9
+000040B9  # ldr w0, [x0] # global file index
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+;============================================================
+; fdt_find_storage: Parse FDT to find storage device
+; x0 = DTB pointer
+; Returns: x0 = MMIO base (0 if not found), x1 = type (0/1/2)
+;============================================================
+:fdt_find_storage
+FF8301D1  # sub sp, sp, #96
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+F61300F9  # str x22, [sp, #32]
+F71700F9  # str x23, [sp, #40]
+F81B00F9  # str x24, [sp, #48]
+FA1F00F9  # str x26, [sp, #56]
+FB2300F9  # str x27, [sp, #64]
+FC2700F9  # str x28, [sp, #72]
+F92B00F9  # str x25, [sp, #80]
+
+400E00B4  # cbz x0, fdt_not_found
+F30300AA  # mov x19, x0 # x19 = DTB base
+
+    ; Validate FDT magic: 0xd00dfeed big-endian = 0xedfe0dd0 as LE lw
+690240B9  # ldr w9, [x19]
+0ABA81D2  # movz x10, #0x0dd0
+CABFBDF2  # movk x10, #0xedfe, lsl #16
+3F010AEB  # cmp w9, w10
+810D0054  # b.ne fdt_not_found
+
+    ; Get structure block offset
+600A40B9  # ldr w0, [x19, #8]
+0EFFFF97  # bl bswap32
+7402008B  # add x20, x19, x0 # x20 = struct block pointer
+
+    ; Get strings block offset
+600E40B9  # ldr w0, [x19, #0xC]
+0BFFFF97  # bl bswap32
+7502008B  # add x21, x19, x0 # x21 = strings block base
+
+160080D2  # mov x22, #0 # node type
+170080D2  # mov x23, #0 # candidate MMIO address
+1C0080D2  # mov x28, #0 # SPI base
+190080D2  # mov x25, #0 # mmc_found flag
+
+:fdt_walk
+800240B9  # ldr w0, [x20]
+04FFFF97  # bl bswap32
+FB0300AA  # mov x27, x0 # token
+94120091  # add x20, x20, #4
+
+7F2700F1  # cmp x27, #9
+E00A0054  # b.eq fdt_walk_done
+7F0700F1  # cmp x27, #1
+C0000054  # b.eq fdt_begin_node
+7F0B00F1  # cmp x27, #2
+E0030054  # b.eq fdt_end_node
+7F0F00F1  # cmp x27, #3
+00060054  # b.eq fdt_prop
+F4FFFF17  # b fdt_walk
+
+:fdt_begin_node
+160080D2  # mov x22, #0
+170080D2  # mov x23, #0
+
+890240B9  # ldr w9, [x20]
+
+    ; "virt" = 0x74726976
+CA2E8DD2  # movz x10, #0x6976
+4A8EAEF2  # movk x10, #0x7472, lsl #16
+3F010AEB  # cmp w9, w10
+61000054  # b.ne fdt_check_spi
+360080D2  # mov x22, #1
+0D000014  # b fdt_skip_name
+
+:fdt_check_spi
+    ; "spi@" = 0x40697073
+6A0E8ED2  # movz x10, #0x7073
+2A0DA8F2  # movk x10, #0x4069, lsl #16
+3F010AEB  # cmp w9, w10
+61000054  # b.ne fdt_check_mmc
+560080D2  # mov x22, #2
+07000014  # b fdt_skip_name
+
+:fdt_check_mmc
+    ; "mmc@" = 0x40636d6d
+AAAD8DD2  # movz x10, #0x6d6d
+6A0CA8F2  # movk x10, #0x4063, lsl #16
+3F010AEB  # cmp w9, w10
+61000054  # b.ne fdt_skip_name
+5C0000B4  # cbz x28, fdt_skip_name
+390080D2  # mov x25, #1
+
+:fdt_skip_name
+89024039  # ldrb w9, [x20]
+94060091  # add x20, x20, #1
+C9FFFFB5  # cbnz w9, fdt_skip_name
+940E0091  # add x20, x20, #3
+94F67E92  # and x20, x20, #0xFFFFFFFFFFFFFFFC
+D9FFFF17  # b fdt_walk
+
+:fdt_end_node
+DF0600F1  # cmp x22, #1
+A1010054  # b.ne fdt_end_check_spi
+D7FAFFB4  # cbz x23, fdt_walk
+
+    ; Probe VirtIO magic
+E90240B9  # ldr w9, [x23]
+CA2E8DD2  # movz x10, #0x6976
+4A8EAEF2  # movk x10, #0x7472, lsl #16
+3F010AEB  # cmp w9, w10
+21FAFF54  # b.ne fdt_walk
+E90A40B9  # ldr w9, [x23, #8]
+3F0900F1  # cmp w9, #2
+C1F9FF54  # b.ne fdt_walk
+
+E00317AA  # mov x0, x23
+210080D2  # mov x1, #1
+2E000014  # b fdt_found
+
+:fdt_end_check_spi
+DF0A00F1  # cmp x22, #2
+21F9FF54  # b.ne fdt_walk
+17F9FFB4  # cbz x23, fdt_walk
+FC0317AA  # mov x28, x23
+C6FFFF17  # b fdt_walk
+
+:fdt_prop
+800240B9  # ldr w0, [x20]
+C9FEFF97  # bl bswap32
+F80300AA  # mov x24, x0 # prop_len
+
+800640B9  # ldr w0, [x20, #4]
+C6FEFF97  # bl bswap32
+FA0300AA  # mov x26, x0 # nameoff
+
+94220091  # add x20, x20, #8
+
+D60200B4  # cbz x22, fdt_prop_skip
+
+    ; Check "reg\0" (byte-by-byte to avoid alignment fault)
+A9021A8B  # add x9, x21, x26
+2A014039  # ldrb w10, [x9]
+5FC901F1  # cmp w10, #0x72 # 'r'
+41020054  # b.ne fdt_prop_skip
+2A054039  # ldrb w10, [x9, #1]
+5F9501F1  # cmp w10, #0x65 # 'e'
+E1010054  # b.ne fdt_prop_skip
+2A094039  # ldrb w10, [x9, #2]
+5F9D01F1  # cmp w10, #0x67 # 'g'
+81010054  # b.ne fdt_prop_skip
+2A0D4039  # ldrb w10, [x9, #3]
+4A0100B5  # cbnz w10, fdt_prop_skip # must be '\0'
+
+    ; Extract MMIO base (8-byte)
+800240B9  # ldr w0, [x20]
+B5FEFF97  # bl bswap32
+177C60D3  # lsl x23, x0, #32
+800640B9  # ldr w0, [x20, #4]
+B2FEFF97  # bl bswap32
+F70200AA  # orr x23, x23, x0
+
+DF0A00F1  # cmp x22, #2
+41000054  # b.ne fdt_prop_skip
+FC0317AA  # mov x28, x23
+
+:fdt_prop_skip
+9402188B  # add x20, x20, x24
+940E0091  # add x20, x20, #3
+94F67E92  # and x20, x20, #0xFFFFFFFFFFFFFFFC
+A5FFFF17  # b fdt_walk
+
+:fdt_walk_done
+B90000B4  # cbz x25, fdt_not_found
+9C0000B4  # cbz x28, fdt_not_found
+E0031CAA  # mov x0, x28
+410080D2  # mov x1, #2
+03000014  # b fdt_found
+
+:fdt_not_found
+000080D2  # mov x0, #0
+010080D2  # mov x1, #0
+
+:fdt_found
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+F61340F9  # ldr x22, [sp, #32]
+F71740F9  # ldr x23, [sp, #40]
+F81B40F9  # ldr x24, [sp, #48]
+FA1F40F9  # ldr x26, [sp, #56]
+FB2340F9  # ldr x27, [sp, #64]
+FC2740F9  # ldr x28, [sp, #72]
+F92B40F9  # ldr x25, [sp, #80]
+FF830191  # add sp, sp, #96
+C0035FD6  # ret
+
+;============================================================
+; virtio_init: Initialize VirtIO block device
+; x0 = MMIO base address
+;============================================================
+:virtio_init
+FFC300D1  # sub sp, sp, #48
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F50B00F9  # str x21, [sp, #16]
+F60F00F9  # str x22, [sp, #24]
+F71300F9  # str x23, [sp, #32]
+
+800700B4  # cbz x0, virtio_init_fail
+F50300AA  # mov x21, x0
+
+160AA8D2  # movz x22, #0x4050, lsl #16 # VirtIO structs base
+1706A8D2  # movz x23, #0x4030, lsl #16 # globals base
+
+    ; Reset device
+BF7200B9  # str wzr, [x21, #0x70]
+
+    ; Set ACKNOWLEDGE
+290080D2  # mov w9, #1
+A97200B9  # str w9, [x21, #0x70]
+
+    ; Set DRIVER
+690080D2  # mov w9, #3
+A97200B9  # str w9, [x21, #0x70]
+
+    ; Check version
+A90640B9  # ldr w9, [x21, #4]
+3F0900F1  # cmp w9, #2
+40020054  # b.eq virtio_modern_setup
+
+:virtio_legacy_setup
+BF2200B9  # str wzr, [x21, #0x20]
+
+E00316AA  # mov x0, x22
+010084D2  # movz x1, #0x2000
+70FEFF97  # bl memset_zero
+
+090082D2  # movz w9, #0x1000
+A92A00B9  # str w9, [x21, #0x28]
+
+BF3200B9  # str wzr, [x21, #0x30]
+
+090180D2  # mov w9, #8
+A93A00B9  # str w9, [x21, #0x38]
+
+090082D2  # movz w9, #0x1000
+A93E00B9  # str w9, [x21, #0x3C]
+
+    ; QueuePFN = 0x40500000 / 4096 = 0x40500
+09A080D2  # movz w9, #0x0500
+8900A0F2  # movk w9, #0x0004, lsl #16
+A94200B9  # str w9, [x21, #0x40]
+
+E90080D2  # mov w9, #7
+A97200B9  # str w9, [x21, #0x70]
+
+23000014  # b virtio_init_done
+
+:virtio_modern_setup
+BF2600B9  # str wzr, [x21, #0x24]
+BF2200B9  # str wzr, [x21, #0x20]
+
+690180D2  # mov w9, #0xB
+A97200B9  # str w9, [x21, #0x70]
+
+A97240B9  # ldr w9, [x21, #0x70]
+29017D92  # and w9, w9, #8
+E9CAFFB4  # cbz w9, reboot
+
+E00316AA  # mov x0, x22
+010084D2  # movz x1, #0x2000
+59FEFF97  # bl memset_zero
+
+BF3200B9  # str wzr, [x21, #0x30]
+
+090180D2  # mov w9, #8
+A93A00B9  # str w9, [x21, #0x38]
+
+E90316AA  # mov w9, w22
+A98200B9  # str w9, [x21, #0x80]
+C9FE60D3  # lsr x9, x22, #32
+A98600B9  # str w9, [x21, #0x84]
+
+C9020291  # add x9, x22, #0x80
+A99200B9  # str w9, [x21, #0x90]
+CAFE60D3  # lsr x10, x22, #32
+AA9600B9  # str w10, [x21, #0x94]
+
+090082D2  # movz x9, #0x1000
+C902098B  # add x9, x22, x9
+A9A200B9  # str w9, [x21, #0xA0]
+CAFE60D3  # lsr x10, x22, #32
+AAA600B9  # str w10, [x21, #0xA4]
+
+290080D2  # mov w9, #1
+A94600B9  # str w9, [x21, #0x44]
+
+E90180D2  # mov w9, #0xF
+A97200B9  # str w9, [x21, #0x70]
+
+04000014  # b virtio_init_done
+
+:virtio_init_fail
+200480D2  # mov x0, #0x21
+F2FDFF97  # bl uart_putchar
+3CFEFF17  # b reboot
+
+:virtio_init_done
+    ; Convert MMIO PA to VA by adding 0xC0000000 (Entry 3 mapping)
+0900B8D2  # movz x9, #0xC000, lsl #16
+B502098B  # add x21, x21, x9
+F50200F9  # str x21, [x23, #0]
+F60600F9  # str x22, [x23, #8]
+
+29020010  # adr x9, virtio_read_sector
+E94600F9  # str x9, [x23, #0x88]
+C90B0010  # adr x9, virtio_write_sector
+E94A00F9  # str x9, [x23, #0x90]
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F50B40F9  # ldr x21, [sp, #16]
+F60F40F9  # ldr x22, [sp, #24]
+F71340F9  # ldr x23, [sp, #32]
+FFC30091  # add sp, sp, #48
+C0035FD6  # ret
+
+;============================================================
+; disk_read_sector / disk_write_sector: dispatch via fn pointer
+;============================================================
+:disk_read_sector
+0906A8D2  # movz x9, #0x4030, lsl #16
+294540F9  # ldr x9, [x9, #0x88]
+20011FD6  # br x9
+
+:disk_write_sector
+0906A8D2  # movz x9, #0x4030, lsl #16
+294940F9  # ldr x9, [x9, #0x90]
+20011FD6  # br x9
+
+;============================================================
+; virtio_read_sector: Read one 512-byte sector
+; x0 = sector, x1 = dest buffer
+;============================================================
+:virtio_read_sector
+FFC300D1  # sub sp, sp, #48
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+F61300F9  # str x22, [sp, #32]
+F40301AA  # mov x20, x1
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+350140F9  # ldr x21, [x9, #0]
+360540F9  # ldr x22, [x9, #8]
+
+090082D2  # movz x9, #0x1000
+C902098B  # add x9, x22, x9
+33054079  # ldrh w19, [x9, #2]
+
+    ; Header at x22 + 0x2000
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+3F0100B9  # str wzr, [x9]
+3F0500B9  # str wzr, [x9, #4]
+200500F9  # str x0, [x9, #8]
+
+    ; Status byte
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+EA1F80D2  # mov w10, #0xFF
+2A010039  # strb w10, [x9]
+
+    ; Desc 0
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+C90200F9  # str x9, [x22]
+090280D2  # mov w9, #16
+C90A00B9  # str w9, [x22, #8]
+290080D2  # mov w9, #1
+C91A0079  # strh w9, [x22, #12]
+290080D2  # mov w9, #1
+C91E0079  # strh w9, [x22, #14]
+
+    ; Desc 1
+D40A00F9  # str x20, [x22, #16]
+094080D2  # mov w9, #512
+C91A00B9  # str w9, [x22, #24]
+690080D2  # mov w9, #3
+C93A0079  # strh w9, [x22, #28]
+490080D2  # mov w9, #2
+C93E0079  # strh w9, [x22, #30]
+
+    ; Desc 2
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+C91200F9  # str x9, [x22, #32]
+290080D2  # mov w9, #1
+C92A00B9  # str w9, [x22, #40]
+490080D2  # mov w9, #2
+C95A0079  # strh w9, [x22, #44]
+DF5E0079  # strh wzr, [x22, #46]
+
+    ; Available ring
+C0020291  # add x0, x22, #0x80
+1F000079  # strh wzr, [x0]
+09044079  # ldrh w9, [x0, #2]
+2A094092  # and w10, w9, #7
+4AF97FD3  # lsl w10, w10, #1
+4A110091  # add w10, w10, #4
+0A000A8B  # add x10, x0, x10
+5F010079  # strh wzr, [x10]
+29050091  # add w9, w9, #1
+09040079  # strh w9, [x0, #2]
+
+9F3F03D5  # dsb sy
+BF5200B9  # str wzr, [x21, #0x50]
+
+090082D2  # movz x9, #0x1000
+C002098B  # add x0, x22, x9
+:virtio_read_poll
+9F3F03D5  # dsb sy
+09044079  # ldrh w9, [x0, #2]
+3F0113EB  # cmp w9, w19
+A0FFFF54  # b.eq virtio_read_poll
+
+A96240B9  # ldr w9, [x21, #0x60]
+A96600B9  # str w9, [x21, #0x64]
+
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+20014039  # ldrb w0, [x9]
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+F61340F9  # ldr x22, [sp, #32]
+FFC30091  # add sp, sp, #48
+C0035FD6  # ret
+
+;============================================================
+; virtio_write_sector: Write one 512-byte sector
+; x0 = sector, x1 = source buffer
+;============================================================
+:virtio_write_sector
+FFC300D1  # sub sp, sp, #48
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+F61300F9  # str x22, [sp, #32]
+F40301AA  # mov x20, x1
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+350140F9  # ldr x21, [x9, #0]
+360540F9  # ldr x22, [x9, #8]
+
+090082D2  # movz x9, #0x1000
+C902098B  # add x9, x22, x9
+33054079  # ldrh w19, [x9, #2]
+
+    ; Header (type=1 write)
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+2A0080D2  # mov w10, #1
+2A0100B9  # str w10, [x9]
+3F0500B9  # str wzr, [x9, #4]
+200500F9  # str x0, [x9, #8]
+
+    ; Status
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+EA1F80D2  # mov w10, #0xFF
+2A010039  # strb w10, [x9]
+
+    ; Desc 0
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+C90200F9  # str x9, [x22]
+090280D2  # mov w9, #16
+C90A00B9  # str w9, [x22, #8]
+290080D2  # mov w9, #1
+C91A0079  # strh w9, [x22, #12]
+290080D2  # mov w9, #1
+C91E0079  # strh w9, [x22, #14]
+
+    ; Desc 1 (device reads)
+D40A00F9  # str x20, [x22, #16]
+094080D2  # mov w9, #512
+C91A00B9  # str w9, [x22, #24]
+290080D2  # mov w9, #1
+C93A0079  # strh w9, [x22, #28]
+490080D2  # mov w9, #2
+C93E0079  # strh w9, [x22, #30]
+
+    ; Desc 2
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+C91200F9  # str x9, [x22, #32]
+290080D2  # mov w9, #1
+C92A00B9  # str w9, [x22, #40]
+490080D2  # mov w9, #2
+C95A0079  # strh w9, [x22, #44]
+DF5E0079  # strh wzr, [x22, #46]
+
+    ; Available ring
+C0020291  # add x0, x22, #0x80
+1F000079  # strh wzr, [x0]
+09044079  # ldrh w9, [x0, #2]
+2A094092  # and w10, w9, #7
+4AF97FD3  # lsl w10, w10, #1
+4A110091  # add w10, w10, #4
+0A000A8B  # add x10, x0, x10
+5F010079  # strh wzr, [x10]
+29050091  # add w9, w9, #1
+09040079  # strh w9, [x0, #2]
+
+9F3F03D5  # dsb sy
+BF5200B9  # str wzr, [x21, #0x50]
+
+090082D2  # movz x9, #0x1000
+C002098B  # add x0, x22, x9
+:virtio_write_poll
+9F3F03D5  # dsb sy
+09044079  # ldrh w9, [x0, #2]
+3F0113EB  # cmp w9, w19
+A0FFFF54  # b.eq virtio_write_poll
+
+A96240B9  # ldr w9, [x21, #0x60]
+A96600B9  # str w9, [x21, #0x64]
+
+090084D2  # movz x9, #0x2000
+C902098B  # add x9, x22, x9
+29410091  # add x9, x9, #0x10
+20014039  # ldrb w0, [x9]
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+F61340F9  # ldr x22, [sp, #32]
+FFC30091  # add sp, sp, #48
+C0035FD6  # ret
+
+;============================================================
+; SPI+SD Driver
+;============================================================
+
+:spi_transfer
+0906A8D2  # movz x9, #0x4030, lsl #16
+294D40F9  # ldr x9, [x9, #0x98]
+:spi_tx_wait
+2A4940B9  # ldr w10, [x9, #0x48]
+5F0100F1  # cmp w10, #0
+CBFFFF54  # b.lt spi_tx_wait
+204900B9  # str w0, [x9, #0x48]
+:spi_rx_wait
+204D40B9  # ldr w0, [x9, #0x4C]
+1F0000F1  # cmp w0, #0
+CBFFFF54  # b.lt spi_rx_wait
+001C4092  # and x0, x0, #0xFF
+C0035FD6  # ret
+
+:spi_sd_cmd
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+
+F2FFFF97  # bl spi_transfer
+
+20FC58D3  # lsr x0, x1, #24
+001C4092  # and x0, x0, #0xFF
+EFFFFF97  # bl spi_transfer
+20FC50D3  # lsr x0, x1, #16
+001C4092  # and x0, x0, #0xFF
+ECFFFF97  # bl spi_transfer
+20FC48D3  # lsr x0, x1, #8
+001C4092  # and x0, x0, #0xFF
+E9FFFF97  # bl spi_transfer
+201C4092  # and x0, x1, #0xFF
+E7FFFF97  # bl spi_transfer
+
+E00302AA  # mov x0, x2
+E5FFFF97  # bl spi_transfer
+
+130180D2  # mov x19, #8
+:spi_sd_cmd_poll
+E01F80D2  # mov x0, #0xFF
+E2FFFF97  # bl spi_transfer
+09007992  # and x9, x0, #0x80
+890000B4  # cbz x9, spi_sd_cmd_done
+730600D1  # sub x19, x19, #1
+73FFFFB5  # cbnz x19, spi_sd_cmd_poll
+E01F80D2  # mov x0, #0xFF
+
+:spi_sd_cmd_done
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+:spi_sd_init
+0906A8D2  # movz x9, #0x4030, lsl #16
+    ; Convert SPI MMIO PA to VA by adding 0xC0000000 (Entry 3 mapping)
+0A00B8D2  # movz x10, #0xC000, lsl #16
+00000A8B  # add x0, x0, x10
+204D00F9  # str x0, [x9, #0x98]
+200100F9  # str x0, [x9, #0]
+
+AA000010  # adr x10, spi_sd_read_sector
+2A4500F9  # str x10, [x9, #0x88]
+4A040010  # adr x10, spi_sd_write_sector
+2A4900F9  # str x10, [x9, #0x90]
+C0035FD6  # ret
+
+:spi_sd_read_sector
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F50B00F9  # str x21, [sp, #16]
+
+F30301AA  # mov x19, x1
+F50300AA  # mov x21, x0
+
+200A80D2  # mov x0, #0x51
+A1DA77D3  # lsl x1, x21, #9
+E21F80D2  # mov x2, #0xFF
+D0FFFF97  # bl spi_sd_cmd
+
+:spi_sd_read_wait_token
+E01F80D2  # mov x0, #0xFF
+C3FFFF97  # bl spi_transfer
+1FF803F1  # cmp x0, #0xFE
+A1FFFF54  # b.ne spi_sd_read_wait_token
+
+154080D2  # mov x21, #512
+:spi_sd_read_loop
+E01F80D2  # mov x0, #0xFF
+BEFFFF97  # bl spi_transfer
+60020039  # strb w0, [x19]
+73060091  # add x19, x19, #1
+B50600D1  # sub x21, x21, #1
+75FFFFB5  # cbnz x21, spi_sd_read_loop
+
+E01F80D2  # mov x0, #0xFF
+B8FFFF97  # bl spi_transfer
+E01F80D2  # mov x0, #0xFF
+B6FFFF97  # bl spi_transfer
+
+000080D2  # mov x0, #0
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F50B40F9  # ldr x21, [sp, #16]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+:spi_sd_write_sector
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F50B00F9  # str x21, [sp, #16]
+
+F30301AA  # mov x19, x1
+F50300AA  # mov x21, x0
+
+000B80D2  # mov x0, #0x58
+A1DA77D3  # lsl x1, x21, #9
+E21F80D2  # mov x2, #0xFF
+B1FFFF97  # bl spi_sd_cmd
+
+E01F80D2  # mov x0, #0xFF
+A4FFFF97  # bl spi_transfer
+C01F80D2  # mov x0, #0xFE
+A2FFFF97  # bl spi_transfer
+
+154080D2  # mov x21, #512
+:spi_sd_write_loop
+60024039  # ldrb w0, [x19]
+9FFFFF97  # bl spi_transfer
+73060091  # add x19, x19, #1
+B50600D1  # sub x21, x21, #1
+95FFFFB5  # cbnz x21, spi_sd_write_loop
+
+E01F80D2  # mov x0, #0xFF
+9AFFFF97  # bl spi_transfer
+E01F80D2  # mov x0, #0xFF
+98FFFF97  # bl spi_transfer
+
+E01F80D2  # mov x0, #0xFF
+96FFFF97  # bl spi_transfer
+
+:spi_sd_write_busy
+E01F80D2  # mov x0, #0xFF
+94FFFF97  # bl spi_transfer
+C0FFFFB4  # cbz x0, spi_sd_write_busy
+
+000080D2  # mov x0, #0
+
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F50B40F9  # ldr x21, [sp, #16]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+;============================================================
+; internalshell: Main command loop (runs in EL1, MMU ON)
+;============================================================
+:internalshell
+FF0301D1  # sub sp, sp, #64
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+F61300F9  # str x22, [sp, #32]
+F71700F9  # str x23, [sp, #40]
+F81B00F9  # str x24, [sp, #48]
+F91F00F9  # str x25, [sp, #56]
+
+:shell_loop
+21FDFF97  # bl read_stdin_byte
+F30300AA  # mov x19, x0
+
+530200B4  # cbz x19, shell_done
+
+7F2A00F1  # cmp x19, #0x0A
+80FFFF54  # b.eq shell_loop
+7F3600F1  # cmp x19, #0x0D
+40FFFF54  # b.eq shell_loop
+
+7F8E00F1  # cmp x19, #0x23
+00010054  # b.eq shell_skip_comment
+
+7FCE01F1  # cmp x19, #0x73
+20040054  # b.eq handle_src
+
+7FA201F1  # cmp x19, #0x68
+E00C0054  # b.eq handle_hex0
+
+7F9A01F1  # cmp x19, #0x66
+80020054  # b.eq handle_flush
+
+F2000014  # b handle_other_command
+
+:shell_skip_comment
+11FDFF97  # bl read_stdin_byte
+1F2800F1  # cmp x0, #0x0A
+C1FFFF54  # b.ne shell_skip_comment
+EDFFFF17  # b shell_loop
+
+:shell_done
+800880D2  # mov x0, #0x44
+AAFCFF97  # bl uart_putchar
+E00D80D2  # mov x0, #0x6F
+A8FCFF97  # bl uart_putchar
+C00D80D2  # mov x0, #0x6E
+A6FCFF97  # bl uart_putchar
+A00C80D2  # mov x0, #0x65
+A4FCFF97  # bl uart_putchar
+C00580D2  # mov x0, #0x2E
+A2FCFF97  # bl uart_putchar
+400180D2  # mov x0, #0x0A
+A0FCFF97  # bl uart_putchar
+
+80010094  # bl flush_disk
+E9FCFF17  # b reboot
+
+;============================================================
+; handle_flush: 'f' command
+;============================================================
+:handle_flush
+FFFCFF97  # bl read_stdin_byte
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A0080D2  # mov x10, #1
+2A2500F9  # str x10, [x9, #0x48]
+
+C00C80D2  # mov x0, #0x66
+98FCFF97  # bl uart_putchar
+400180D2  # mov x0, #0x0A
+96FCFF97  # bl uart_putchar
+
+D6FFFF17  # b shell_loop
+
+;============================================================
+; handle_src: 's' command - read file from stdin
+;============================================================
+:handle_src
+600E80D2  # mov x0, #0x73
+93FCFF97  # bl uart_putchar
+400E80D2  # mov x0, #0x72
+91FCFF97  # bl uart_putchar
+600C80D2  # mov x0, #0x63
+8FFCFF97  # bl uart_putchar
+000480D2  # mov x0, #0x20
+8DFCFF97  # bl uart_putchar
+
+EEFCFF97  # bl read_stdin_byte
+EDFCFF97  # bl read_stdin_byte
+ECFCFF97  # bl read_stdin_byte
+
+140080D2  # mov x20, #0
+:src_parse_count
+EAFCFF97  # bl read_stdin_byte
+1F8000F1  # cmp x0, #0x20
+C0000054  # b.eq src_count_done
+490180D2  # mov x9, #10
+947E099B  # mul x20, x20, x9
+00C000D1  # sub x0, x0, #0x30
+9402008B  # add x20, x20, x0
+F9FFFF17  # b src_parse_count
+:src_count_done
+F50314AA  # mov x21, x20
+
+1600ACD2  # movz x22, #0x6000, lsl #16
+F70316AA  # mov x23, x22
+:src_read_name
+DFFCFF97  # bl read_stdin_byte
+1F2800F1  # cmp x0, #0x0A
+80000054  # b.eq src_name_done
+E0020039  # strb w0, [x23]
+F7060091  # add x23, x23, #1
+FBFFFF17  # b src_read_name
+:src_name_done
+FF020039  # strb wzr, [x23]
+
+E00316AA  # mov x0, x22
+AFFCFF97  # bl print_string
+400180D2  # mov x0, #0x0A
+73FCFF97  # bl uart_putchar
+
+E00316AA  # mov x0, x22
+1BFDFF97  # bl absolute_path
+F60300AA  # mov x22, x0
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+370940F9  # ldr x23, [x9, #0x10]
+
+4A00ACD2  # movz x10, #0x6002, lsl #16
+EBD676D3  # lsl x11, x23, #10
+4A010B8B  # add x10, x10, x11
+EB0316AA  # mov x11, x22
+:src_copy_fname
+6C014039  # ldrb w12, [x11]
+4C010039  # strb w12, [x10]
+8C0000B4  # cbz w12, src_fname_done
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+FBFFFF17  # b src_copy_fname
+:src_fname_done
+
+4910ACD2  # movz x9, #0x6082, lsl #16
+EAEE7CD3  # lsl x10, x23, #4
+36010A8B  # add x22, x9, x10
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A0D40F9  # ldr x10, [x9, #0x18]
+CA0200F9  # str x10, [x22]
+DF0600F9  # str xzr, [x22, #8]
+
+2A0940F9  # ldr x10, [x9, #0x10]
+4A050091  # add x10, x10, #1
+2A0900F9  # str x10, [x9, #0x10]
+
+D70240F9  # ldr x23, [x22]
+
+:src_read_data
+D40000B4  # cbz x20, src_data_done
+B9FCFF97  # bl read_stdin_byte
+E0020039  # strb w0, [x23]
+F7060091  # add x23, x23, #1
+940600D1  # sub x20, x20, #1
+FBFFFF17  # b src_read_data
+:src_data_done
+
+D50600F9  # str x21, [x22, #8]
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A0D40F9  # ldr x10, [x9, #0x18]
+4A01158B  # add x10, x10, x21
+2A0D00F9  # str x10, [x9, #0x18]
+
+8EFFFF17  # b shell_loop
+
+;============================================================
+; handle_hex0: 'h' command - compile hex0 source to binary
+;============================================================
+:handle_hex0
+000D80D2  # mov x0, #0x68
+4BFCFF97  # bl uart_putchar
+A00C80D2  # mov x0, #0x65
+49FCFF97  # bl uart_putchar
+000F80D2  # mov x0, #0x78
+47FCFF97  # bl uart_putchar
+000680D2  # mov x0, #0x30
+45FCFF97  # bl uart_putchar
+000480D2  # mov x0, #0x20
+43FCFF97  # bl uart_putchar
+
+A4FCFF97  # bl read_stdin_byte
+A3FCFF97  # bl read_stdin_byte
+A2FCFF97  # bl read_stdin_byte
+A1FCFF97  # bl read_stdin_byte
+
+1400ACD2  # movz x20, #0x6000, lsl #16
+F70314AA  # mov x23, x20
+:hex0_read_input
+9EFCFF97  # bl read_stdin_byte
+1F8000F1  # cmp x0, #0x20
+80000054  # b.eq hex0_input_done
+E0020039  # strb w0, [x23]
+F7060091  # add x23, x23, #1
+FBFFFF17  # b hex0_read_input
+:hex0_input_done
+FF020039  # strb wzr, [x23]
+
+E00314AA  # mov x0, x20
+6EFCFF97  # bl print_string
+000480D2  # mov x0, #0x20
+32FCFF97  # bl uart_putchar
+
+1500ACD2  # movz x21, #0x6000, lsl #16
+B5021091  # add x21, x21, #0x400
+F70315AA  # mov x23, x21
+:hex0_read_output
+90FCFF97  # bl read_stdin_byte
+1F2800F1  # cmp x0, #0x0A
+80000054  # b.eq hex0_output_done
+E0020039  # strb w0, [x23]
+F7060091  # add x23, x23, #1
+FBFFFF17  # b hex0_read_output
+:hex0_output_done
+FF020039  # strb wzr, [x23]
+
+E00315AA  # mov x0, x21
+60FCFF97  # bl print_string
+400180D2  # mov x0, #0x0A
+24FCFF97  # bl uart_putchar
+
+E00314AA  # mov x0, x20
+CCFCFF97  # bl absolute_path
+F40300AA  # mov x20, x0
+35FDFF97  # bl find_file
+1F0000F1  # cmp x0, #0
+EBEBFF54  # b.lt shell_loop
+F70300AA  # mov x23, x0
+
+4910ACD2  # movz x9, #0x6082, lsl #16
+EAEE7CD3  # lsl x10, x23, #4
+29010A8B  # add x9, x9, x10
+360140F9  # ldr x22, [x9]
+370540F9  # ldr x23, [x9, #8]
+
+E00315AA  # mov x0, x21
+C0FCFF97  # bl absolute_path
+F50300AA  # mov x21, x0
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+380940F9  # ldr x24, [x9, #0x10]
+
+4A00ACD2  # movz x10, #0x6002, lsl #16
+0BD776D3  # lsl x11, x24, #10
+4A010B8B  # add x10, x10, x11
+EB0315AA  # mov x11, x21
+:hex0_copy_outname
+6C014039  # ldrb w12, [x11]
+4C010039  # strb w12, [x10]
+8C0000B4  # cbz w12, hex0_outname_done
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+FBFFFF17  # b hex0_copy_outname
+:hex0_outname_done
+
+4910ACD2  # movz x9, #0x6082, lsl #16
+0AEF7CD3  # lsl x10, x24, #4
+38010A8B  # add x24, x9, x10
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A0D40F9  # ldr x10, [x9, #0x18]
+4A1D0091  # add x10, x10, #7
+4AF17D92  # and x10, x10, #0xFFFFFFFFFFFFFFF8
+2A0D00F9  # str x10, [x9, #0x18] # aligned next_file_address
+0A0300F9  # str x10, [x24]
+1F0700F9  # str xzr, [x24, #8]
+
+2A0940F9  # ldr x10, [x9, #0x10]
+4A050091  # add x10, x10, #1
+2A0900F9  # str x10, [x9, #0x10]
+
+190340F9  # ldr x25, [x24]
+
+130080D2  # mov x19, #0
+140080D2  # mov x20, #0
+
+:hex0_compile_loop
+9F0217EB  # cmp x20, x23
+2A060054  # b.ge hex0_compile_done
+
+C902148B  # add x9, x22, x20
+20014039  # ldrb w0, [x9]
+94060091  # add x20, x20, #1
+
+1F8C00F1  # cmp w0, #0x23
+80040054  # b.eq hex0_skip_comment
+1FEC00F1  # cmp w0, #0x3B
+40040054  # b.eq hex0_skip_comment
+
+1FC000F1  # cmp w0, #0x30
+CBFEFF54  # b.lt hex0_compile_loop
+1FE800F1  # cmp w0, #0x3A
+4B010054  # b.lt hex0_digit
+1F0401F1  # cmp w0, #0x41
+4BFEFF54  # b.lt hex0_compile_loop
+1F1C01F1  # cmp w0, #0x47
+0B010054  # b.lt hex0_upper
+1F8401F1  # cmp w0, #0x61
+CBFDFF54  # b.lt hex0_compile_loop
+1F9C01F1  # cmp w0, #0x67
+CB000054  # b.lt hex0_lower
+EBFFFF17  # b hex0_compile_loop
+
+:hex0_digit
+00C000D1  # sub x0, x0, #0x30
+05000014  # b hex0_got_nibble
+:hex0_upper
+00DC00D1  # sub x0, x0, #0x37
+03000014  # b hex0_got_nibble
+:hex0_lower
+005C01D1  # sub x0, x0, #0x57
+01000014  # b hex0_got_nibble
+
+:hex0_got_nibble
+691E4092  # and x9, x19, #0xFF
+C90000B5  # cbnz x9, hex0_second_nibble
+
+00EC7CD3  # lsl x0, x0, #4
+00DC78D3  # lsl x0, x0, #8
+290080D2  # mov x9, #1
+130009AA  # orr x19, x0, x9
+DEFFFF17  # b hex0_compile_loop
+
+:hex0_second_nibble
+69FE48D3  # lsr x9, x19, #8
+290D7C92  # and x9, x9, #0xF0
+290100AA  # orr x9, x9, x0
+29030039  # strb w9, [x25]
+39070091  # add x25, x25, #1
+130080D2  # mov x19, #0
+D7FFFF17  # b hex0_compile_loop
+
+:hex0_skip_comment
+9F0217EB  # cmp x20, x23
+EA000054  # b.ge hex0_compile_done
+C902148B  # add x9, x22, x20
+20014039  # ldrb w0, [x9]
+94060091  # add x20, x20, #1
+1F2800F1  # cmp w0, #0x0A
+41FFFF54  # b.ne hex0_skip_comment
+CFFFFF17  # b hex0_compile_loop
+
+:hex0_compile_done
+090340F9  # ldr x9, [x24]
+290309CB  # sub x9, x25, x9
+090700F9  # str x9, [x24, #8]
+
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B0D40F9  # ldr x11, [x10, #0x18]
+6B01098B  # add x11, x11, x9
+4B0D00F9  # str x11, [x10, #0x18]
+
+00FFFF17  # b shell_loop
+
+;============================================================
+; handle_other_command: Execute external program
+;============================================================
+:handle_other_command
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A2540F9  # ldr x10, [x9, #0x48]
+4A0000B4  # cbz x10, hoc_no_flush
+9C000094  # bl flush_disk
+:hoc_no_flush
+
+1400ACD2  # movz x20, #0x6000, lsl #16
+090081D2  # movz x9, #0x800
+9402098B  # add x20, x20, x9
+93020039  # strb w19, [x20]
+95060091  # add x21, x20, #1
+
+:hoc_read_name
+17FCFF97  # bl read_stdin_byte
+1F8000F1  # cmp x0, #0x20
+80000054  # b.eq hoc_name_done
+A0020039  # strb w0, [x21]
+B5060091  # add x21, x21, #1
+FBFFFF17  # b hoc_read_name
+:hoc_name_done
+BF020039  # strb wzr, [x21]
+
+1500ACD2  # movz x21, #0x6000, lsl #16
+098081D2  # movz x9, #0xC00
+B502098B  # add x21, x21, x9
+F60315AA  # mov x22, x21
+:hoc_read_arg
+0CFCFF97  # bl read_stdin_byte
+1F2800F1  # cmp x0, #0x0A
+80000054  # b.eq hoc_arg_done
+C0020039  # strb w0, [x22]
+D6060091  # add x22, x22, #1
+FBFFFF17  # b hoc_read_arg
+:hoc_arg_done
+DF020039  # strb wzr, [x22]
+
+E00314AA  # mov x0, x20
+DCFBFF97  # bl print_string
+000480D2  # mov x0, #0x20
+A0FBFF97  # bl uart_putchar
+E00315AA  # mov x0, x21
+D8FBFF97  # bl print_string
+400180D2  # mov x0, #0x0A
+9CFBFF97  # bl uart_putchar
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+342D00F9  # str x20, [x9, #0x58]
+353100F9  # str x21, [x9, #0x60]
+3F3500F9  # str xzr, [x9, #0x68]
+3F3900F9  # str xzr, [x9, #0x70]
+
+E00314AA  # mov x0, x20
+3FFCFF97  # bl absolute_path
+F40300AA  # mov x20, x0
+
+A8FCFF97  # bl find_file
+1F0000F1  # cmp x0, #0
+8B0D0054  # b.lt hoc_not_found
+F60300AA  # mov x22, x0
+
+4910ACD2  # movz x9, #0x6082, lsl #16
+CAEE7CD3  # lsl x10, x22, #4
+29010A8B  # add x9, x9, x10
+360140F9  # ldr x22, [x9]
+370540F9  # ldr x23, [x9, #8]
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20]
+4A050091  # add x10, x10, #1
+2A1100F9  # str x10, [x9, #0x20]
+
+29FCFF97  # bl get_process_base
+F80300AA  # mov x24, x0
+
+090082D2  # movz x9, #0x1000
+090309CB  # sub x9, x24, x9
+2A010491  # add x10, x9, #0x100
+0B030491  # add x11, x24, #0x100
+0C2080D2  # mov x12, #256
+:hoc_copy_cwd
+EC0000B4  # cbz x12, hoc_cwd_done
+4D014039  # ldrb w13, [x10]
+6D010039  # strb w13, [x11]
+4A050091  # add x10, x10, #1
+6B050091  # add x11, x11, #1
+8C0500D1  # sub x12, x12, #1
+FAFFFF17  # b hoc_copy_cwd
+:hoc_cwd_done
+
+00030891  # add x0, x24, #0x200
+01C081D2  # movz x1, #0xE00
+C6FBFF97  # bl memset_zero
+
+D90E40F9  # ldr x25, [x22, #0x18]
+C91240F9  # ldr x9, [x22, #0x20]
+D702098B  # add x23, x22, x9
+D3724079  # ldrh w19, [x22, #0x38]
+
+000CA8D2  # movz x0, #0x4060, lsl #16
+0104A0D2  # movz x1, #0x20, lsl #16
+BFFBFF97  # bl memset_zero
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+0A0EA8D2  # movz x10, #0x4070, lsl #16
+2A2100F9  # str x10, [x9, #0x40]
+
+:hoc_load_phdr
+530300B4  # cbz x19, hoc_load_done
+E90240B9  # ldr w9, [x23]
+3F0500F1  # cmp w9, #1
+81020054  # b.ne hoc_next_phdr
+
+E90640F9  # ldr x9, [x23, #0x08]
+C102098B  # add x1, x22, x9
+E90A40F9  # ldr x9, [x23, #0x10]
+0A00A8D2  # movz x10, #0x4000, lsl #16
+20010A8B  # add x0, x9, x10
+E21240F9  # ldr x2, [x23, #0x20]
+B7FBFF97  # bl memcpy
+
+E90A40F9  # ldr x9, [x23, #0x10]
+EA1240F9  # ldr x10, [x23, #0x20]
+29010A8B  # add x9, x9, x10
+0A00A8D2  # movz x10, #0x4000, lsl #16
+29010A8B  # add x9, x9, x10
+0A0084D2  # movz x10, #0x2000
+29010A8B  # add x9, x9, x10
+0A06A8D2  # movz x10, #0x4030, lsl #16
+4B2140F9  # ldr x11, [x10, #0x40]
+7F0109EB  # cmp x11, x9
+4A000054  # b.ge hoc_next_phdr
+492100F9  # str x9, [x10, #0x40]
+
+:hoc_next_phdr
+F7E20091  # add x23, x23, #56
+730600D1  # sub x19, x19, #1
+E7FFFF17  # b hoc_load_phdr
+
+:hoc_load_done
+090CA8D2  # movz x9, #0x4060, lsl #16
+090300F9  # str x9, [x24]
+
+1F1300F9  # str xzr, [x24, #0x20]
+
+0908ACD2  # movz x9, #0x6040, lsl #16
+0A0082D2  # movz x10, #0x1000
+29010A8B  # add x9, x9, x10
+EA030091  # mov x10, sp
+2A0900F9  # str x10, [x9, #0x10]
+
+1300AAD2  # movz x19, #0x5000, lsl #16
+
+732200D1  # sub x19, x19, #8
+7F0200F9  # str xzr, [x19]
+
+732200D1  # sub x19, x19, #8
+7F0200F9  # str xzr, [x19]
+
+    ; Copy arg to PA 0x4FF00000 (VA 0x0FF00000)
+16FEA9D2  # movz x22, #0x4FF0, lsl #16
+E00316AA  # mov x0, x22
+E10315AA  # mov x1, x21
+022080D2  # mov x2, #256
+96FBFF97  # bl memcpy
+0900A8D2  # movz x9, #0x4000, lsl #16
+C90209CB  # sub x9, x22, x9
+732200D1  # sub x19, x19, #8
+690200F9  # str x9, [x19]
+
+    ; Copy command name to PA 0x4FF00100
+D7020491  # add x23, x22, #0x100
+E00317AA  # mov x0, x23
+E10314AA  # mov x1, x20
+022080D2  # mov x2, #256
+8DFBFF97  # bl memcpy
+0900A8D2  # movz x9, #0x4000, lsl #16
+E90209CB  # sub x9, x23, x9
+732200D1  # sub x19, x19, #8
+690200F9  # str x9, [x19]
+
+732200D1  # sub x19, x19, #8
+490080D2  # mov x9, #2
+690200F9  # str x9, [x19]
+
+0900A8D2  # movz x9, #0x4000, lsl #16
+730209CB  # sub x19, x19, x9
+
+1F7508D5  # ic iallu
+9F3F03D5  # dsb sy
+DF3F03D5  # isb
+
+394018D5  # msr elr_el1, x25
+
+090080D2  # movz x9, #0
+094018D5  # msr spsr_el1, x9
+
+134118D5  # msr sp_el0, x19
+E0039FD6  # eret
+
+:hoc_not_found
+E00780D2  # mov x0, #0x3F
+24FBFF97  # bl uart_putchar
+400180D2  # mov x0, #0x0A
+22FBFF97  # bl uart_putchar
+62FEFF17  # b shell_loop
+
+:shell_return
+61FEFF17  # b shell_loop
+
+;============================================================
+; flush_disk: Write /dev/hda file contents back to disk
+;============================================================
+:flush_disk
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F50F00F9  # str x21, [sp, #24]
+
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A2540F9  # ldr x10, [x9, #0x48]
+AA0400B4  # cbz x10, flush_done
+
+0000ACD2  # movz x0, #0x6000, lsl #16
+E90580D2  # mov w9, #0x2F
+09000039  # strb w9, [x0]
+890C80D2  # mov w9, #0x64
+09040039  # strb w9, [x0, #1]
+A90C80D2  # mov w9, #0x65
+09080039  # strb w9, [x0, #2]
+C90E80D2  # mov w9, #0x76
+090C0039  # strb w9, [x0, #3]
+E90580D2  # mov w9, #0x2F
+09100039  # strb w9, [x0, #4]
+090D80D2  # mov w9, #0x68
+09140039  # strb w9, [x0, #5]
+890C80D2  # mov w9, #0x64
+09180039  # strb w9, [x0, #6]
+290C80D2  # mov w9, #0x61
+091C0039  # strb w9, [x0, #7]
+1F200039  # strb wzr, [x0, #8]
+1AFCFF97  # bl find_file
+1F0000F1  # cmp x0, #0
+0B020054  # b.lt flush_done
+
+4910ACD2  # movz x9, #0x6082, lsl #16
+0AEC7CD3  # lsl x10, x0, #4
+29010A8B  # add x9, x9, x10
+330140F9  # ldr x19, [x9]
+340540F9  # ldr x20, [x9, #8]
+
+150080D2  # mov x21, #0
+:flush_sector_loop
+9F0200F1  # cmp x20, #0
+0D010054  # b.le flush_done
+
+E00315AA  # mov x0, x21
+E10313AA  # mov x1, x19
+1AFDFF97  # bl disk_write_sector
+
+73020891  # add x19, x19, #512
+940208D1  # sub x20, x20, #512
+B5060091  # add x21, x21, #1
+F8FFFF17  # b flush_sector_loop
+
+:flush_done
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+F50F40F9  # ldr x21, [sp, #24]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+;============================================================
+; main: Boot sequence
+;============================================================
+:main
+    ; Use SP_EL1 for kernel, then set it
+BF4100D5  # msr spsel, #1
+DF3F03D5  # isb
+0900ADD2  # movz x9, #0x6800, lsl #16
+3F010091  # mov sp, x9 # SP_EL1 = 0x68000000
+
+    ; Save x0 = stdin_sector and x1 = DTB pointer
+F80300AA  # mov x24, x0
+F90301AA  # mov x25, x1
+
+    ; Load RAM base into x20
+2EFBFF97  # bl load_ram_base
+
+    ; Set up exception vector table
+A9AFFE10  # adr x9, exception_vectors
+09C018D5  # msr vbar_el1, x9
+
+    ; Disable all EL1 interrupts
+DF4F03D5  # msr daifset, #0xF
+
+    ; Parse device tree
+E00319AA  # mov x0, x25
+20FCFF97  # bl fdt_find_storage
+
+3F0400F1  # cmp x1, #1
+80000054  # b.eq init_virtio
+3F0800F1  # cmp x1, #2
+80000054  # b.eq init_spi_sd
+28FBFF17  # b reboot
+
+:init_virtio
+A7FCFF97  # bl virtio_init
+02000014  # b storage_ready
+
+:init_spi_sd
+C6FDFF97  # bl spi_sd_init
+
+:storage_ready
+
+    ; Initialize global data
+0906A8D2  # movz x9, #0x4030, lsl #16
+
+6A0080D2  # mov x10, #3
+2A0900F9  # str x10, [x9, #0x10]
+
+0A80B2D2  # movz x10, #0x9400, lsl #16
+2A0D00F9  # str x10, [x9, #0x18]
+
+2A0080D2  # mov x10, #1
+2A1100F9  # str x10, [x9, #0x20]
+
+0A00AED2  # movz x10, #0x7000, lsl #16
+2A1500F9  # str x10, [x9, #0x28]
+
+3F2500F9  # str xzr, [x9, #0x48]
+3F2900F9  # str xzr, [x9, #0x50]
+
+394100F9  # str x25, [x9, #0x80]
+
+0A0EA8D2  # movz x10, #0x4070, lsl #16
+2A2100F9  # str x10, [x9, #0x40]
+
+381900F9  # str x24, [x9, #0x30]
+0A4080D2  # mov x10, #512
+2A1D00F9  # str x10, [x9, #0x38]
+
+    ; Zero process descriptors (64KB at 0x60400000)
+0008ACD2  # movz x0, #0x6040, lsl #16
+010280D2  # movz x1, #0x10, lsl #12
+16FBFF97  # bl memset_zero
+
+    ; Zero file names area (8MB at 0x60020000)
+4000ACD2  # movz x0, #0x6002, lsl #16
+0110A0D2  # movz x1, #0x80, lsl #16
+13FBFF97  # bl memset_zero
+
+    ; Zero file descriptors area (512KB at 0x60820000)
+4010ACD2  # movz x0, #0x6082, lsl #16
+0101A0D2  # movz x1, #0x8, lsl #16
+10FBFF97  # bl memset_zero
+
+    ; Set process 0 current_dir = "/"
+0908ACD2  # movz x9, #0x6040, lsl #16
+EA0580D2  # mov w10, #0x2F
+2A010439  # strb w10, [x9, #0x100]
+3F050439  # strb wzr, [x9, #0x101]
+    ; Process 1
+0A0082D2  # movz x10, #0x1000
+29010A8B  # add x9, x9, x10
+EA0580D2  # mov w10, #0x2F
+2A010439  # strb w10, [x9, #0x100]
+3F050439  # strb wzr, [x9, #0x101]
+
+    ; Set up page table
+33FBFF97  # bl setup_page_table
+
+    ; Enable MMU (stays on forever)
+A90082D2  # movz x9, #0x1005 # M=1, C=1, I=1
+091018D5  # msr sctlr_el1, x9
+DF3F03D5  # isb
+
+    ; Jump to internal shell
+EAFDFF17  # b internalshell
