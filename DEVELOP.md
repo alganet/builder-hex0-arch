@@ -37,6 +37,7 @@ hex2_word.c, so AArch64 pre-resolves all offsets in Python).
 | rv64-asm2hex2.py | RISC-V assembly-to-hex2 converter |
 | asm.py | RISC-V instruction encoder library |
 | builder-hex0-aarch64-stage1-virt.S | AArch64 QEMU virt stage 1 (VirtIO) |
+| builder-hex0-aarch64-stage1-raspi3b.S | AArch64 RPi 3B stage 1 (SDHCI, core parking) |
 | builder-hex0-aarch64-stage2.S | AArch64 portable stage 2 kernel |
 | a64-asm2hex2.py | AArch64 assembly-to-hex2 converter (two-pass) |
 | a64_asm.py | AArch64 instruction encoder library |
@@ -51,12 +52,12 @@ hex2_word.c, so AArch64 pre-resolves all offsets in Python).
 
 Each board has its own stage 1. Stage 1 is architecture- and board-specific.
 
-| | RISC-V | AArch64 |
-|---|---|---|
-| Load address | `0x80200000` (by OpenSBI) | `0x40080000` (by QEMU) |
-| Entry state | `a0`=hartid, `a1`=dtb | `x0`=dtb |
-| Stage 2 address | `0x80210000` | `0x40210000` |
-| Exit convention | `a0`=sector, `a1`=DTB | `x0`=sector, `x1`=DTB |
+| | RISC-V | AArch64 (virt) | AArch64 (raspi3b) |
+|---|---|---|---|
+| Load address | `0x80200000` (by OpenSBI) | `0x40080000` (by QEMU) | `0x00080000` (by QEMU) |
+| Entry state | `a0`=hartid, `a1`=dtb | `x0`=dtb | EL2, all 4 cores |
+| Stage 2 address | `0x80210000` | `0x40210000` | `0x00210000` |
+| Exit convention | `a0`=sector, `a1`=DTB | `x0`=sector, `x1`=DTB | `x0`=sector, `x1`=0, `x2`=SDHCI base, `x3`=3 |
 
 Responsibilities:
 1. Find and initialize the storage device (board-specific)
@@ -73,6 +74,12 @@ for block device. Legacy VirtIO v1. 512 bytes.
 
 **AArch64 virt** stage 1: scans VirtIO MMIO range `0x0A000000-0x0A004000`
 (32 slots, step 0x200) for block device. Legacy VirtIO v1. 500 bytes.
+
+**AArch64 raspi3b** stage 1: parks non-boot cores (MPIDR check + WFE),
+drops from EL2 to EL1, initializes ARASAN SDHCI at `0x3F300000`
+(CMD0/CMD8/ACMD41/CMD2/CMD3/CMD7/CMD16), reads hex0 source via CMD17
+PIO (128 unrolled word reads per sector to work around QEMU TCG caching),
+compiles to binary, re-inits SDHCI before jumping to stage 2. 1916 bytes.
 
 ### Stage 2: Portable (per-architecture)
 
@@ -96,14 +103,29 @@ whichever storage driver the DTB selects.
 ### AArch64
 
 * Runs at EL1 (no firmware layer)
-* AArch64 paging with L1 1GB block descriptors, MAIR/TCR/TTBR0
-* Console via PL011 UART at `0x09000000`
-* Reboot via PSCI `SYSTEM_RESET` (`HVC #0`, x0=`0x84000009`)
 * Syscalls via `SVC #0` with number in `x8`
-* RAM at `0x40000000`
-* MMU stays on during kernel execution (4 L1 block entries cover user RAM,
-  kernel RAM, upper RAM, and device MMIO at VA 0xC0000000+)
+* MMU stays on during kernel execution
 * Exception vector table at VBAR_EL1 (2KB-aligned, 16 entries × 128 bytes)
+* Console via PL011 UART (board-specific VA)
+
+**Virt:**
+* L1 1GB block descriptors (4 entries: user, kernel, upper, MMIO)
+* PL011 UART at VA `0xC9000000` (PA `0x09000000`, MMIO entry)
+* VirtIO storage discovered via DTB
+* RAM at `0x40000000` (2GB)
+* Reboot via PSCI `SYSTEM_RESET` (`HVC #0`, x0=`0x84000009`)
+
+**Raspi3b:**
+* Board detection via trampoline: `adr` address < `0x40000000` = raspi3b
+* L1 + L2 page tables: Entry 0/1 use L2 (504 normal + 8 device entries),
+  Entry 2 is a 1GB block (file data region)
+* PL011 UART at VA `0x7F201000` (PA `0x3F201000`, Entry 1 device region)
+* SDHCI ARASAN at VA `0x7F300000` (PA `0x3F300000`)
+* 1GB RAM (PA `0x00-0x3F`), all L1 entries alias to same physical memory
+* CMD18 preload: 16128 sectors (8MB) read into VA `0x42000000` (PA `0x02000000`)
+  at boot for fast stdin access; falls back to per-sector CMD17 when exhausted
+* Multi-core: stage 1 parks cores 1-3 via MPIDR check + WFE
+* Reboot via BCM2835 PM watchdog (PM_RSTS + PM_WDOG + PM_RSTC at PA `0x3F100000`)
 
 
 ### FDT Storage Discovery
@@ -111,6 +133,8 @@ whichever storage driver the DTB selects.
 `fdt_find_storage(dtb_ptr)` returns MMIO base and type:
 - Type 1 (VirtIO): node name starts with `"virt"`, probed for magic + block ID
 - Type 2 (SPI+SD): node name `"spi@..."` with `"mmc@..."` child (RISC-V only)
+- Type 3 (SDHCI): stage 1 passes SDHCI base directly via `x2`, no DTB discovery
+  (AArch64 raspi3b — the ARASAN SDHCI is not in the DTB)
 
 
 ### Reboot (not Shutdown)
@@ -118,6 +142,10 @@ whichever storage driver the DTB selects.
 Both architectures use reboot (not shutdown). Reboot is more portable and
 matches the bootstrap lifecycle: boot → build → rewrite disk → reboot into
 next stage. Tests use `--no-reboot` so QEMU exits cleanly.
+
+The reboot method is board-conditional: RISC-V uses SBI SRST, AArch64 virt
+uses PSCI HVC, AArch64 raspi3b uses the BCM2835 power management watchdog
+(writing PM_RSTS, PM_WDOG, PM_RSTC with the PM password `0x5A`).
 
 
 ## Porting
@@ -185,8 +213,25 @@ qemu-system-aarch64 -machine virt -cpu cortex-a53 -m 2G -nographic \
 gdb-multiarch -ex "target remote :1234" -ex "set arch aarch64"
 ```
 
+### AArch64 — Raspberry Pi 3B
+
+```
+# Terminal 1: start QEMU paused
+qemu-system-aarch64 -machine raspi3b -serial mon:stdio -nographic \
+    -kernel builder-hex0-aarch64-stage1-raspi3b.bin \
+    -drive file=disk.img,if=sd,format=raw \
+    -s -S --no-reboot
+
+# Terminal 2: attach GDB
+gdb-multiarch -ex "target remote :1234" -ex "set arch aarch64"
+```
+
+### General
+
 For instruction tracing: `qemu-system-{arch} -d in_asm,cpu ...`
 
 For VirtIO debugging: `-trace "virtio_blk*" -trace "virtio_mmio*"`
 
 For SD card debugging (RISC-V): `-trace "sdcard_*" -d guest_errors`
+
+For SDHCI debugging (AArch64 raspi3b): `-trace "sdhci_*" -d guest_errors`

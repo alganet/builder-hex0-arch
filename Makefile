@@ -42,8 +42,9 @@ clean:
 	rm -f builder-hex0-riscv64-stage1-sifive_u.hex2 builder-hex0-riscv64-stage1-sifive_u.bin builder-hex0-riscv64-stage1-sifive_u.hex0
 	rm -f builder-hex0-riscv64-stage2.hex2 builder-hex0-riscv64-stage2.bin builder-hex0-riscv64-stage2.hex0
 	rm -f builder-hex0-aarch64-stage1-virt.hex2 builder-hex0-aarch64-stage1-virt.bin builder-hex0-aarch64-stage1-virt.hex0
+	rm -f builder-hex0-aarch64-stage1-raspi3b.hex2 builder-hex0-aarch64-stage1-raspi3b.bin builder-hex0-aarch64-stage1-raspi3b.hex0
 	rm -f builder-hex0-aarch64-stage2.hex2 builder-hex0-aarch64-stage2.bin builder-hex0-aarch64-stage2.hex0
-	rm -f test-virt.img test-sifive_u.img
+	rm -f test-virt.img test-sifive_u.img test-raspi3b.img
 	$(MAKE) -C hex2 clean
 
 .PHONY: all riscv64 aarch64 test test-riscv64 test-aarch64 clean
@@ -73,9 +74,12 @@ else ifeq ($(ARCH),aarch64)
   STAGE2_BASE = 0x40210000
   HEX2_ARCH = aarch64
   STAGE1_VIRT = builder-hex0-aarch64-stage1-virt
+  STAGE1_RASPI3B = builder-hex0-aarch64-stage1-raspi3b
   STAGE2 = builder-hex0-aarch64-stage2
-  BUILD_TARGETS = $(STAGE1_VIRT).hex0 $(STAGE1_VIRT).bin $(STAGE2).hex0
-  TEST_TARGETS = test-boot-virt
+  BUILD_TARGETS = $(STAGE1_VIRT).hex0 $(STAGE1_VIRT).bin \
+                  $(STAGE1_RASPI3B).hex0 $(STAGE1_RASPI3B).bin \
+                  $(STAGE2).hex0
+  TEST_TARGETS = test-boot-virt test-boot-raspi3b
 endif
 
 # ---- Internal build/test targets (require ARCH=) ----
@@ -98,6 +102,20 @@ $(STAGE1_VIRT).bin: $(STAGE1_VIRT).hex2 $(HEX2)
 
 $(STAGE1_VIRT).hex0: $(STAGE1_VIRT).hex2 $(STAGE1_VIRT).bin hex2tohex0.py
 	$(PYTHON3) hex2tohex0.py $(STAGE1_VIRT).hex2 $(STAGE1_VIRT).bin $(STAGE1_VIRT).hex0
+
+# --- Stage 1 raspi3b (aarch64 only) ---
+
+ifeq ($(ARCH),aarch64)
+$(STAGE1_RASPI3B).hex2: $(STAGE1_RASPI3B).S $(ASM2HEX2) $(ASM_LIB)
+	$(PYTHON3) $(ASM2HEX2) < $(STAGE1_RASPI3B).S > $(STAGE1_RASPI3B).hex2
+
+$(STAGE1_RASPI3B).bin: $(STAGE1_RASPI3B).hex2 $(HEX2)
+	$(HEX2) -f $(STAGE1_RASPI3B).hex2 --architecture $(HEX2_ARCH) \
+		--base-address 0x00080000 --little-endian -o $(STAGE1_RASPI3B).bin
+
+$(STAGE1_RASPI3B).hex0: $(STAGE1_RASPI3B).hex2 $(STAGE1_RASPI3B).bin hex2tohex0.py
+	$(PYTHON3) hex2tohex0.py $(STAGE1_RASPI3B).hex2 $(STAGE1_RASPI3B).bin $(STAGE1_RASPI3B).hex0
+endif
 
 # --- Stage 1 sifive_u (riscv64 only) ---
 
@@ -158,5 +176,15 @@ test-boot-sifive_u: $(STAGE1_SIFIVE_U).bin $(STAGE2).hex0
 	$(QEMU) -machine sifive_u -m 2G -nographic \
 		-kernel $(STAGE1_SIFIVE_U).bin \
 		-drive file=test-sifive_u.img,format=raw,if=sd \
+		--no-reboot
+endif
+
+ifeq ($(ARCH),aarch64)
+test-boot-raspi3b: $(STAGE1_RASPI3B).bin $(STAGE2).hex0
+	dd if=/dev/zero of=test-raspi3b.img bs=1024 count=1024 2>/dev/null
+	dd if=$(STAGE2).hex0 of=test-raspi3b.img bs=512 conv=notrunc 2>/dev/null
+	$(QEMU) -machine raspi3b -serial mon:stdio -nographic \
+		-kernel $(STAGE1_RASPI3B).bin \
+		-sd test-raspi3b.img \
 		--no-reboot
 endif

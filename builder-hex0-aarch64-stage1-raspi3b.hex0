@@ -1,0 +1,565 @@
+# SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builder-hex0 AArch64 Stage 1 — Raspberry Pi 3B
+#
+# Board-specific hex0 compiler bootloader for QEMU raspi3b.
+# Loaded by QEMU -kernel at EL2. Drops to EL1, inits SDHCI (ARASAN),
+# reads hex0 source from SD card sector 0, compiles to binary
+# at 0x00210000, jumps there with:
+#   x0 = next disk sector, x1 = 0 (no DTB on raspi3b),
+#   x2 = SDHCI base (0x3F300000), x3 = 3 (SDHCI type)
+#
+# QEMU raspi3b connects -sd to ARASAN SDHCI at 0x3F300000.
+# UART PL011 at 0x3F201000.
+#
+# Registers (callee-saved x19-x28):
+#   x19 = hex state    x20 = current sector
+#   x21 = buffer offset (init 512 to force read)
+#   x22 = SDHCI base   x23 = sector buffer (0x00500000)
+#   x24 = output ptr    x25 = high nibble
+#   x28 = saved lr
+
+#:_start
+    ; Park non-boot cores (QEMU raspi3b starts all 4 cores)
+a9 00 38 d5  # mrs x9, mpidr_el1
+29 1d 40 92  # and x9, x9, #0xFF
+69 3b 00 b5  # cbnz x9, park_core
+
+49 42 38 d5  # mrs x9, currentel
+29 fd 42 d3  # lsr x9, x9, #2
+3f 05 00 f1  # cmp x9, #1
+a0 01 00 54  # b.eq at_el1
+
+    ; EL2 -> EL1 drop
+09 00 b0 d2  # movz x9, #0x8000, lsl #16
+49 00 80 f2  # movk x9, #0x0002
+09 11 1c d5  # msr hcr_el2, x9
+5f 11 1c d5  # msr cptr_el2, xzr
+69 00 80 d2  # mov x9, #3
+09 e1 1c d5  # msr cnthctl_el2, x9
+1f 10 1c d5  # msr sctlr_el2, xzr
+a9 78 80 d2  # movz x9, #0x03C5
+09 40 1c d5  # msr spsr_el2, x9
+69 00 00 10  # adr x9, at_el1
+29 40 1c d5  # msr elr_el2, x9
+e0 03 9f d6  # eret
+
+#:at_el1
+09 00 a5 d2  # movz x9, #0x2800, lsl #16
+3f 01 00 91  # mov sp, x9
+
+    ; SDHCI base
+16 e6 a7 d2  # movz x22, #0x3F30, lsl #16
+    ; Sector buffer
+17 0a a0 d2  # movz x23, #0x0050, lsl #16
+
+    ; --- SDHCI init ---
+2a 00 80 d2  # mov w10, #1
+ca be 00 39  # strb w10, [x22, #0x2F] # reset
+2a 00 80 d2  # movz w10, #0x0001
+ca 5a 00 79  # strh w10, [x22, #0x2C] # enable internal clock
+#:clk_wait
+ca 5a 40 79  # ldrh w10, [x22, #0x2C]
+4a 01 7f 92  # and w10, w10, #2
+ca ff ff b4  # cbz w10, clk_wait
+aa 00 80 d2  # movz w10, #0x0005
+ca 5a 00 79  # strh w10, [x22, #0x2C] # + SD clock enable
+ea 01 80 d2  # mov w10, #0x0F
+ca a6 00 39  # strb w10, [x22, #0x29] # power on 3.3V
+ca 01 80 d2  # mov w10, #0x0E
+ca ba 00 39  # strb w10, [x22, #0x2E] # timeout
+ea ff 9f d2  # movz w10, #0xFFFF
+ca 36 00 b9  # str w10, [x22, #0x34] # interrupt status enable
+ca 3a 00 b9  # str w10, [x22, #0x38] # interrupt signal enable
+
+    ; --- SD card init ---
+df 0a 00 b9  # str wzr, [x22, #0x08]
+df 0e 00 b9  # str wzr, [x22, #0x0C]
+ae 01 00 94  # bl emmc_wait # CMD0
+
+4a 35 80 d2  # movz w10, #0x01AA
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 03 a1 f2  # movk w10, #0x081A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+a8 01 00 94  # bl emmc_wait # CMD8
+
+    ; CMD55
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a e3 a6 f2  # movk w10, #0x371A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+a3 01 00 94  # bl emmc_wait
+
+    ; ACMD41 — loop until busy bit set
+0a 00 90 d2  # movz w10, #0x8000
+ea 1f a8 f2  # movk w10, #0x40FF, lsl #16
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 20 a5 f2  # movk w10, #0x2902, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+9c 01 00 94  # bl emmc_wait
+
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+2a 41 a0 f2  # movk w10, #0x0209, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+97 01 00 94  # bl emmc_wait # CMD2
+
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 63 a0 f2  # movk w10, #0x031A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+92 01 00 94  # bl emmc_wait # CMD3
+ca 12 40 b9  # ldr w10, [x22, #0x10]
+4a 3d 70 92  # and w10, w10, #0xFFFF0000
+
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a e3 a0 f2  # movk w10, #0x071A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+8b 01 00 94  # bl emmc_wait # CMD7
+
+0a 40 80 d2  # movz w10, #0x200
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 03 a2 f2  # movk w10, #0x101A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+85 01 00 94  # bl emmc_wait # CMD16
+
+    ; --- Hex0 compiler ---
+38 04 a0 d2  # movz x24, #0x0021, lsl #16
+13 00 80 d2  # movz x19, #0
+14 00 80 d2  # movz x20, #0
+15 40 80 d2  # movz x21, #512
+
+#:hex0_loop
+64 00 00 94  # bl next_byte
+20 04 00 b4  # cbz w0, hex0_done
+1f 84 00 f1  # cmp w0, #0x21
+ab ff ff 54  # b.lt hex0_loop
+1f 8c 00 f1  # cmp w0, #0x23
+00 03 00 54  # b.eq skip_comment
+1f ec 00 f1  # cmp w0, #0x3B
+c0 02 00 54  # b.eq skip_comment
+1f 84 01 f1  # cmp w0, #0x61
+4b 00 00 54  # b.lt no_lower
+00 80 00 d1  # sub w0, w0, #0x20
+#:no_lower
+01 c0 00 d1  # sub w1, w0, #0x30
+3f 00 00 f1  # cmp w1, #0
+6b fe ff 54  # b.lt hex0_loop
+3f 28 00 f1  # cmp w1, #10
+ab 00 00 54  # b.lt got_nibble
+21 44 00 d1  # sub w1, w1, #17
+3f 18 00 f1  # cmp w1, #6
+c2 fd ff 54  # b.hs hex0_loop
+21 28 00 91  # add w1, w1, #10
+#:got_nibble
+93 00 00 b5  # cbnz w19, second_nibble
+39 ec 7c d3  # lsl w25, w1, #4
+33 00 80 d2  # movz w19, #1
+e9 ff ff 17  # b hex0_loop
+#:second_nibble
+21 03 01 aa  # orr w1, w25, w1
+01 03 00 39  # strb w1, [x24]
+18 07 00 91  # add x24, x24, #1
+13 00 80 d2  # movz w19, #0
+e4 ff ff 17  # b hex0_loop
+
+#:skip_comment
+47 00 00 94  # bl next_byte
+80 00 00 b4  # cbz w0, hex0_done
+1f 28 00 f1  # cmp w0, #0x0A
+a1 ff ff 54  # b.ne skip_comment
+df ff ff 17  # b hex0_loop
+
+#:hex0_done
+    ; Re-init SDHCI before jumping to stage2 (resets QEMU TCG state)
+2a 00 80 d2  # mov w10, #1
+ca be 00 39  # strb w10, [x22, #0x2F] # software reset
+2a 00 80 d2  # movz w10, #0x0001
+ca 5a 00 79  # strh w10, [x22, #0x2C] # enable internal clock
+#:s1_clk
+ca 5a 40 79  # ldrh w10, [x22, #0x2C]
+4a 01 7f 92  # and w10, w10, #2
+ca ff ff b4  # cbz w10, s1_clk
+aa 00 80 d2  # movz w10, #0x0005
+ca 5a 00 79  # strh w10, [x22, #0x2C] # + SD clock enable
+ea 01 80 d2  # mov w10, #0x0F
+ca a6 00 39  # strb w10, [x22, #0x29] # power on 3.3V
+ca 01 80 d2  # mov w10, #0x0E
+ca ba 00 39  # strb w10, [x22, #0x2E] # timeout
+ea ff 9f d2  # movz w10, #0xFFFF
+ca 36 00 b9  # str w10, [x22, #0x34] # interrupt status enable
+ca 3a 00 b9  # str w10, [x22, #0x38] # interrupt signal enable
+    ; CMD0
+df 0a 00 b9  # str wzr, [x22, #0x08]
+df 0e 00 b9  # str wzr, [x22, #0x0C]
+4c 01 00 94  # bl emmc_wait
+    ; CMD8
+4a 35 80 d2  # movz w10, #0x01AA
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 03 a1 f2  # movk w10, #0x081A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+46 01 00 94  # bl emmc_wait
+    ; CMD55
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a e3 a6 f2  # movk w10, #0x371A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+41 01 00 94  # bl emmc_wait
+    ; ACMD41
+0a 00 90 d2  # movz w10, #0x8000
+ea 1f a8 f2  # movk w10, #0x40FF, lsl #16
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 20 a5 f2  # movk w10, #0x2902, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+3a 01 00 94  # bl emmc_wait
+    ; CMD2
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+2a 41 a0 f2  # movk w10, #0x0209, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+35 01 00 94  # bl emmc_wait
+    ; CMD3
+df 0a 00 b9  # str wzr, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 63 a0 f2  # movk w10, #0x031A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+30 01 00 94  # bl emmc_wait
+ca 12 40 b9  # ldr w10, [x22, #0x10]
+4a 3d 70 92  # and w10, w10, #0xFFFF0000
+    ; CMD7
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a e3 a0 f2  # movk w10, #0x071A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+29 01 00 94  # bl emmc_wait
+    ; CMD16
+0a 40 80 d2  # movz w10, #0x200
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 00 80 d2  # movz w10, #0x0000
+4a 03 a2 f2  # movk w10, #0x101A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+23 01 00 94  # bl emmc_wait
+
+e0 03 14 aa  # mov x0, x20
+e1 03 1f aa  # mov x1, xzr
+e2 03 16 aa  # mov x2, x22
+63 00 80 d2  # mov x3, #3
+29 04 a0 d2  # movz x9, #0x0021, lsl #16
+20 01 1f d6  # br x9
+
+#:next_byte
+bf 02 08 f1  # cmp w21, #512
+cb 00 00 54  # b.lt nb_ready
+fc 03 1e aa  # mov x28, lr
+07 00 00 94  # bl read_sector
+fe 03 1c aa  # mov lr, x28
+94 06 00 91  # add x20, x20, #1
+15 00 80 d2  # movz x21, #0
+#:nb_ready
+e0 6a 75 38  # ldrb w0, [x23, x21]
+b5 06 00 91  # add x21, x21, #1
+c0 03 5f d6  # ret
+
+; Read sector x20 via SDHCI PIO into buffer at x23
+; QEMU TCG caches MMIO reads in loops. Must use fully unrolled reads.
+; 128 sequential ldr/str pairs = 512 bytes. No function calls (all inline).
+#:read_sector
+    ; Clear all interrupt status before new transfer
+ea ff 9f d2  # movz w10, #0xFFFF
+ca 32 00 b9  # str w10, [x22, #0x30]
+0a 40 80 d2  # movz w10, #0x0200
+ca 0a 00 79  # strh w10, [x22, #0x04]
+2a 00 80 d2  # mov w10, #1
+ca 0e 00 79  # strh w10, [x22, #0x06]
+8a da 77 d3  # lsl w10, w20, #9
+ca 0a 00 b9  # str w10, [x22, #0x08]
+0a 02 80 d2  # movz w10, #0x0010
+4a 27 a2 f2  # movk w10, #0x113A, lsl #16
+ca 0e 00 b9  # str w10, [x22, #0x0C]
+    ; Wait Buffer Read Ready (bit 5)
+#:rs_brr
+ca 32 40 b9  # ldr w10, [x22, #0x30]
+4b 01 7b 92  # and w11, w10, #0x20
+cb ff ff b4  # cbz w11, rs_brr
+e9 03 17 aa  # mov x9, x23
+    ; 128 sequential PIO reads
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 01 00 b9  # str w10, [x9, #0]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 05 00 b9  # str w10, [x9, #4]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 09 00 b9  # str w10, [x9, #8]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 0d 00 b9  # str w10, [x9, #12]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 11 00 b9  # str w10, [x9, #16]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 15 00 b9  # str w10, [x9, #20]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 19 00 b9  # str w10, [x9, #24]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 1d 00 b9  # str w10, [x9, #28]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 21 00 b9  # str w10, [x9, #32]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 25 00 b9  # str w10, [x9, #36]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 29 00 b9  # str w10, [x9, #40]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 2d 00 b9  # str w10, [x9, #44]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 31 00 b9  # str w10, [x9, #48]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 35 00 b9  # str w10, [x9, #52]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 39 00 b9  # str w10, [x9, #56]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 3d 00 b9  # str w10, [x9, #60]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 41 00 b9  # str w10, [x9, #64]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 45 00 b9  # str w10, [x9, #68]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 49 00 b9  # str w10, [x9, #72]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 4d 00 b9  # str w10, [x9, #76]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 51 00 b9  # str w10, [x9, #80]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 55 00 b9  # str w10, [x9, #84]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 59 00 b9  # str w10, [x9, #88]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 5d 00 b9  # str w10, [x9, #92]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 61 00 b9  # str w10, [x9, #96]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 65 00 b9  # str w10, [x9, #100]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 69 00 b9  # str w10, [x9, #104]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 6d 00 b9  # str w10, [x9, #108]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 71 00 b9  # str w10, [x9, #112]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 75 00 b9  # str w10, [x9, #116]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 79 00 b9  # str w10, [x9, #120]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 7d 00 b9  # str w10, [x9, #124]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 81 00 b9  # str w10, [x9, #128]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 85 00 b9  # str w10, [x9, #132]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 89 00 b9  # str w10, [x9, #136]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 8d 00 b9  # str w10, [x9, #140]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 91 00 b9  # str w10, [x9, #144]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 95 00 b9  # str w10, [x9, #148]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 99 00 b9  # str w10, [x9, #152]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 9d 00 b9  # str w10, [x9, #156]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a1 00 b9  # str w10, [x9, #160]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a5 00 b9  # str w10, [x9, #164]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a9 00 b9  # str w10, [x9, #168]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a ad 00 b9  # str w10, [x9, #172]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b1 00 b9  # str w10, [x9, #176]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b5 00 b9  # str w10, [x9, #180]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b9 00 b9  # str w10, [x9, #184]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a bd 00 b9  # str w10, [x9, #188]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c1 00 b9  # str w10, [x9, #192]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c5 00 b9  # str w10, [x9, #196]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c9 00 b9  # str w10, [x9, #200]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a cd 00 b9  # str w10, [x9, #204]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d1 00 b9  # str w10, [x9, #208]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d5 00 b9  # str w10, [x9, #212]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d9 00 b9  # str w10, [x9, #216]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a dd 00 b9  # str w10, [x9, #220]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e1 00 b9  # str w10, [x9, #224]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e5 00 b9  # str w10, [x9, #228]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e9 00 b9  # str w10, [x9, #232]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a ed 00 b9  # str w10, [x9, #236]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f1 00 b9  # str w10, [x9, #240]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f5 00 b9  # str w10, [x9, #244]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f9 00 b9  # str w10, [x9, #248]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a fd 00 b9  # str w10, [x9, #252]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 01 01 b9  # str w10, [x9, #256]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 05 01 b9  # str w10, [x9, #260]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 09 01 b9  # str w10, [x9, #264]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 0d 01 b9  # str w10, [x9, #268]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 11 01 b9  # str w10, [x9, #272]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 15 01 b9  # str w10, [x9, #276]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 19 01 b9  # str w10, [x9, #280]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 1d 01 b9  # str w10, [x9, #284]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 21 01 b9  # str w10, [x9, #288]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 25 01 b9  # str w10, [x9, #292]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 29 01 b9  # str w10, [x9, #296]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 2d 01 b9  # str w10, [x9, #300]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 31 01 b9  # str w10, [x9, #304]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 35 01 b9  # str w10, [x9, #308]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 39 01 b9  # str w10, [x9, #312]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 3d 01 b9  # str w10, [x9, #316]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 41 01 b9  # str w10, [x9, #320]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 45 01 b9  # str w10, [x9, #324]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 49 01 b9  # str w10, [x9, #328]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 4d 01 b9  # str w10, [x9, #332]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 51 01 b9  # str w10, [x9, #336]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 55 01 b9  # str w10, [x9, #340]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 59 01 b9  # str w10, [x9, #344]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 5d 01 b9  # str w10, [x9, #348]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 61 01 b9  # str w10, [x9, #352]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 65 01 b9  # str w10, [x9, #356]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 69 01 b9  # str w10, [x9, #360]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 6d 01 b9  # str w10, [x9, #364]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 71 01 b9  # str w10, [x9, #368]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 75 01 b9  # str w10, [x9, #372]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 79 01 b9  # str w10, [x9, #376]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 7d 01 b9  # str w10, [x9, #380]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 81 01 b9  # str w10, [x9, #384]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 85 01 b9  # str w10, [x9, #388]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 89 01 b9  # str w10, [x9, #392]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 8d 01 b9  # str w10, [x9, #396]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 91 01 b9  # str w10, [x9, #400]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 95 01 b9  # str w10, [x9, #404]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 99 01 b9  # str w10, [x9, #408]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a 9d 01 b9  # str w10, [x9, #412]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a1 01 b9  # str w10, [x9, #416]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a5 01 b9  # str w10, [x9, #420]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a a9 01 b9  # str w10, [x9, #424]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a ad 01 b9  # str w10, [x9, #428]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b1 01 b9  # str w10, [x9, #432]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b5 01 b9  # str w10, [x9, #436]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a b9 01 b9  # str w10, [x9, #440]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a bd 01 b9  # str w10, [x9, #444]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c1 01 b9  # str w10, [x9, #448]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c5 01 b9  # str w10, [x9, #452]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a c9 01 b9  # str w10, [x9, #456]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a cd 01 b9  # str w10, [x9, #460]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d1 01 b9  # str w10, [x9, #464]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d5 01 b9  # str w10, [x9, #468]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a d9 01 b9  # str w10, [x9, #472]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a dd 01 b9  # str w10, [x9, #476]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e1 01 b9  # str w10, [x9, #480]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e5 01 b9  # str w10, [x9, #484]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a e9 01 b9  # str w10, [x9, #488]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a ed 01 b9  # str w10, [x9, #492]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f1 01 b9  # str w10, [x9, #496]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f5 01 b9  # str w10, [x9, #500]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a f9 01 b9  # str w10, [x9, #504]
+ca 22 40 b9  # ldr w10, [x22, #0x20]
+2a fd 01 b9  # str w10, [x9, #508]
+ea ff 9f d2  # movz w10, #0xFFFF
+ca 32 00 b9  # str w10, [x22, #0x30]
+c0 03 5f d6  # ret
+
+; QEMU processes SDHCI commands instantly — no polling needed.
+; Wait for Command Complete (bit 0) then clear status.
+#:emmc_wait
+ca 32 40 b9  # ldr w10, [x22, #0x30]
+4b 01 40 92  # and w11, w10, #1
+cb ff ff b4  # cbz w11, emmc_wait
+ea ff 9f d2  # movz w10, #0xFFFF
+ca 32 00 b9  # str w10, [x22, #0x30]
+c0 03 5f d6  # ret
+
+#:park_core
+5f 20 03 d5  # wfe
+ff ff ff 17  # b park_core

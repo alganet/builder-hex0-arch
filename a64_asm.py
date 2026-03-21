@@ -56,6 +56,13 @@ SYSREGS = {
     'currentel':  0x4212,  # S3_0_C4_C2_2
     'daif':       0x5A11,  # S3_3_C4_C2_1
     'mpidr_el1':  0x4005,  # S3_0_C0_C0_5
+    # EL2 registers (for raspi3b EL2->EL1 drop)
+    'hcr_el2':     0x6088,  # S3_4_C1_C1_0
+    'sctlr_el2':   0x6080,  # S3_4_C1_C0_0
+    'spsr_el2':    0x6200,  # S3_4_C4_C0_0
+    'elr_el2':     0x6201,  # S3_4_C4_C0_1
+    'cnthctl_el2': 0x6708,  # S3_4_C14_C1_0
+    'cptr_el2':    0x608A,  # S3_4_C1_C1_2
 }
 
 # ---------------------------------------------------------------------------
@@ -159,7 +166,7 @@ def emit(mnemonic, *args):
     if mn == 'isb':
         return to_le_hex(0xD5033FDF)
     if mn == 'tlbi_vmalle1':
-        return to_le_hex(0xD5088F1F)
+        return to_le_hex(0xD508871F)
     if mn == 'ic_iallu':
         # IC IALLU - invalidate all instruction caches
         return to_le_hex(0xD508751F)
