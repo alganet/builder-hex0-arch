@@ -8,6 +8,13 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Build Chain
 
+### x86 (vendored)
+
+No build step — hex0 source files are included directly:
+* `builder-hex0-x86-stage1-bios.hex0` — stage 1 (MBR boot + hex0 compiler)
+* `builder-hex0-x86-stage2.hex0` — stage 2 (full builder with shell)
+* `builder-hex0-x86-mini.hex0` — minimal hex0-only compiler (512 bytes)
+
 ### RISC-V 64-bit
 
 ```
@@ -29,21 +36,26 @@ hex2_word.c, so AArch64 pre-resolves all offsets in Python).
 
 ## Source Files
 
-| File | Purpose |
-|------|---------|
-| builder-hex0-riscv64-stage1-virt.S | RISC-V QEMU virt stage 1 (VirtIO) |
-| builder-hex0-riscv64-stage1-sifive_u.S | RISC-V SiFive sifive_u stage 1 (SPI+SD) |
-| builder-hex0-riscv64-stage2.S | RISC-V portable stage 2 kernel |
-| rv64-asm2hex2.py | RISC-V assembly-to-hex2 converter |
-| asm.py | RISC-V instruction encoder library |
-| builder-hex0-aarch64-stage1-virt.S | AArch64 QEMU virt stage 1 (VirtIO) |
-| builder-hex0-aarch64-stage1-raspi3b.S | AArch64 RPi 3B stage 1 (SDHCI, core parking) |
-| builder-hex0-aarch64-stage2.S | AArch64 portable stage 2 kernel |
-| a64-asm2hex2.py | AArch64 assembly-to-hex2 converter (two-pass) |
-| a64_asm.py | AArch64 instruction encoder library |
-| hex2tohex0.py | hex2-to-hex0 converter with comments (shared) |
-| hex2/ | Vendored hex2 linker (C source, shared) |
-| Makefile | Multi-architecture build (`ARCH=riscv64\|aarch64`) |
+| File                                   | Purpose                                         |
+|----------------------------------------|-------------------------------------------------|
+| builder-hex0-x86-stage1-bios.hex0      | x86 BIOS stage 1 (vendored, Rick Masters)       |
+| builder-hex0-x86-stage2.hex0           | x86 full builder (vendored, Rick Masters)       |
+| builder-hex0-x86-mini.hex0             | x86 mini hex0 compiler (vendored, Rick Masters) |
+| builder-hex0-riscv64-stage1-virt.S     | RISC-V QEMU virt stage 1 (VirtIO)               |
+| builder-hex0-riscv64-stage1-sifive_u.S | RISC-V SiFive sifive_u stage 1 (SPI+SD)         |
+| builder-hex0-riscv64-stage2.S          | RISC-V portable stage 2 kernel                  |
+| rv64-asm2hex2.py                       | RISC-V assembly-to-hex2 converter               |
+| asm.py                                 | RISC-V instruction encoder library              |
+| builder-hex0-aarch64-stage1-virt.S     | AArch64 QEMU virt stage 1 (VirtIO)              |
+| builder-hex0-aarch64-stage1-raspi3b.S  | AArch64 RPi 3B stage 1 (SDHCI, core parking)    |
+| builder-hex0-aarch64-stage2.S          | AArch64 portable stage 2 kernel                 |
+| a64-asm2hex2.py                        | AArch64 assembly-to-hex2 converter (two-pass)   |
+| a64_asm.py                             | AArch64 instruction encoder library             |
+| hex2tohex0.py                          | hex2-to-hex0 converter with comments (shared)   |
+| hex0-to-src.sh                         | Generate shell script for hex0 self-compilation |
+| build-self.sh                          | Boot kernel and hex0-compile a source file      |
+| hex2/                                  | Vendored hex2 linker (C source, shared)         |
+| Makefile                               | Multi-architecture build with per-board targets |
 
 
 ## Two-Stage Boot
@@ -52,12 +64,12 @@ hex2_word.c, so AArch64 pre-resolves all offsets in Python).
 
 Each board has its own stage 1. Stage 1 is architecture- and board-specific.
 
-| | RISC-V | AArch64 (virt) | AArch64 (raspi3b) |
-|---|---|---|---|
-| Load address | `0x80200000` (by OpenSBI) | `0x40080000` (by QEMU) | `0x00080000` (by QEMU) |
-| Entry state | `a0`=hartid, `a1`=dtb | `x0`=dtb | EL2, all 4 cores |
-| Stage 2 address | `0x80210000` | `0x40210000` | `0x00210000` |
-| Exit convention | `a0`=sector, `a1`=DTB | `x0`=sector, `x1`=DTB | `x0`=sector, `x1`=0, `x2`=SDHCI base, `x3`=3 |
+|                 | RISC-V                    | AArch64 (virt)         | AArch64 (raspi3b)                            |
+|-----------------|---------------------------|------------------------|----------------------------------------------|
+| Load address    | `0x80200000` (by OpenSBI) | `0x40080000` (by QEMU) | `0x00080000` (by QEMU)                       |
+| Entry state     | `a0`=hartid, `a1`=dtb     | `x0`=dtb               | EL2, all 4 cores                             |
+| Stage 2 address | `0x80210000`              | `0x40210000`           | `0x00210000`                                 |
+| Exit convention | `a0`=sector, `a1`=DTB     | `x0`=sector, `x1`=DTB  | `x0`=sector, `x1`=0, `x2`=SDHCI base, `x3`=3 |
 
 Responsibilities:
 1. Find and initialize the storage device (board-specific)
@@ -148,6 +160,47 @@ uses PSCI HVC, AArch64 raspi3b uses the BCM2835 power management watchdog
 (writing PM_RSTS, PM_WDOG, PM_RSTC with the PM password `0x5A`).
 
 
+## Self-Build Reproducibility
+
+Each architecture can prove its hex0 compiler produces identical output to the
+host toolchain. The `make self-test` targets automate this.
+
+### x86
+
+The x86 chain follows the original builder-hex0 pattern:
+
+1. Host compiles `builder-hex0-x86-mini.hex0` to binary using `xxd` (seed)
+2. Mini seed boots in QEMU, compiles `stage1-bios.hex0` → writes to disk
+3. Host also compiles `stage1-bios.hex0` using `xxd`
+4. Diff the two binaries — proves mini's hex0 compiler matches host
+
+The x86 also has a "full builds full" chain (the full builder can compile its
+own hex0 source via the `hex0` shell command), matching the original
+builder-hex0 Makefile.
+
+### RISC-V and AArch64
+
+These architectures don't have a "mini" variant. Stage 1 IS the hex0 compiler,
+but it can't self-build in isolation because:
+- It needs QEMU `-kernel` to load (not MBR boot)
+- The compiled output goes to a fixed RAM address, not back to disk
+- Stage 1 has no "write to disk" capability
+
+Instead, self-builds go through the full stage 2 kernel:
+
+1. Host compiles stage 1 and stage 2 from hex0 source (seed binaries)
+2. Stage 1 seed boots → compiles stage 2 hex0 → stage 2 kernel runs
+3. Internal shell loads a hex0 file via `src`, compiles it via `hex0`, flushes
+   to disk via `f`
+4. Extract the result from the disk image and diff against the seed binary
+
+This is one extra layer compared to x86 mini, but achieves the same proof:
+the hex0 compiler (embedded in the kernel) reproduces the binary from source.
+
+Both stage 1 and stage 2 are tested:
+- `make self-test-{arch}-{board}` runs both stage1 and stage2 self-builds
+
+
 ## Porting
 
 ### New board (same architecture)
@@ -157,7 +210,7 @@ uses PSCI HVC, AArch64 raspi3b uses the BCM2835 power management watchdog
 3. If using a new storage type, add a driver to stage 2 implementing
    `xx_read_sector(a0=sector, a1=buffer)` and `xx_write_sector`
 4. Add detection logic in `fdt_find_storage` for the new DTB node pattern
-5. Add a test target (`test-boot-{board}`)
+5. Add a test target (`test-{arch}-{board}`) and self-test target (`self-test-{arch}-{board}`)
 
 ### New architecture
 
@@ -172,12 +225,16 @@ uses PSCI HVC, AArch64 raspi3b uses the BCM2835 power management watchdog
 
 ```
 make clean && make                     # all architectures
+make x86                              # x86 (vendored, no build step)
 make riscv64                           # riscv64 only
 make aarch64                           # aarch64 only
 
-make test                              # all architectures
-make test-riscv64                      # riscv64 only
-make test-aarch64                      # aarch64 only
+make test                              # boot tests, all arch+board combos
+make test-x86-bios                     # one board
+make test-aarch64-raspi3b              # one board
+
+make self-test                         # self-build reproducibility, all
+make self-test-aarch64-virt            # one board
 ```
 
 The RISC-V sifive_u test requires QEMU >= 10.1.

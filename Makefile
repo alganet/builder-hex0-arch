@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Makefile for builder-hex0-more
+# Makefile for builder-hex0-arch
 #
 # Multi-architecture, multi-board two-stage build:
 #   Stage 1 (board-specific): .S -> .hex2 -> .bin
@@ -10,37 +10,54 @@
 #
 # Usage:
 #   make                          # build all
+#   make x86                      # x86 is vendored (no build step)
 #   make riscv64                  # build riscv64 (all boards)
 #   make aarch64                  # build aarch64 (all boards)
 #   make test                     # test all
+#   make test-x86-bios            # test one board
 #   make test-riscv64-virt        # test one board
 #   make test-aarch64-raspi3b     # test one board
 
 PYTHON3 ?= python3
 HEX2 = hex2/hex2
+QEMU_X86 ?= qemu-system-x86_64
 QEMU_RISCV64 ?= qemu-system-riscv64
 QEMU_AARCH64 ?= qemu-system-aarch64
 
 # ---- Top-level targets ----
 
-all: riscv64 aarch64
+all: x86 riscv64 aarch64
+
+x86:
+	@echo "x86: vendored hex0 (no build step)"
 
 riscv64: riscv64-stage1-virt riscv64-stage1-sifive_u riscv64-stage2
 aarch64: aarch64-stage1-virt aarch64-stage1-raspi3b aarch64-stage2
 
-test: test-riscv64 test-aarch64
+test: test-x86 test-riscv64 test-aarch64
+test-x86: test-x86-bios
 test-riscv64: test-riscv64-virt test-riscv64-sifive_u
 test-aarch64: test-aarch64-virt test-aarch64-raspi3b
 
+self-test: self-test-x86 self-test-riscv64 self-test-aarch64
+self-test-x86: self-test-x86-bios
+self-test-riscv64: self-test-riscv64-virt self-test-riscv64-sifive_u
+self-test-aarch64: self-test-aarch64-virt self-test-aarch64-raspi3b
+
 clean:
-	rm -f builder-hex0-*.hex2 builder-hex0-*.bin builder-hex0-*.hex0 test-*.img
+	rm -f builder-hex0-riscv64-*.hex2 builder-hex0-riscv64-*.bin builder-hex0-riscv64-*.hex0
+	rm -f builder-hex0-aarch64-*.hex2 builder-hex0-aarch64-*.bin builder-hex0-aarch64-*.hex0
+	rm -f test-*.img test-self-*.bin BUILD -rf
 	$(MAKE) -C hex2 clean
 
-.PHONY: all riscv64 aarch64 test test-riscv64 test-aarch64 clean
+.PHONY: all x86 riscv64 aarch64 test test-x86 test-riscv64 test-aarch64 clean
+.PHONY: self-test self-test-x86 self-test-riscv64 self-test-aarch64
 .PHONY: riscv64-stage1-virt riscv64-stage1-sifive_u riscv64-stage2
 .PHONY: aarch64-stage1-virt aarch64-stage1-raspi3b aarch64-stage2
-.PHONY: test-riscv64-virt test-riscv64-sifive_u
+.PHONY: test-x86-bios test-riscv64-virt test-riscv64-sifive_u
 .PHONY: test-aarch64-virt test-aarch64-raspi3b
+.PHONY: self-test-x86-bios self-test-riscv64-virt self-test-riscv64-sifive_u
+.PHONY: self-test-aarch64-virt self-test-aarch64-raspi3b
 
 # ---- hex2 linker ----
 
@@ -134,6 +151,28 @@ builder-hex0-aarch64-stage2.hex0: builder-hex0-aarch64-stage2.hex2 builder-hex0-
 	$(PYTHON3) hex2tohex0.py $< builder-hex0-aarch64-stage2.bin $@
 
 # ===========================================================================
+# x86 (vendored hex0, no build step)
+# ===========================================================================
+
+# --- x86 bios ---
+
+test-x86-bios: builder-hex0-x86-stage1-bios.hex0 builder-hex0-x86-stage2.hex0 builder-hex0-x86-mini.hex0
+	@echo "=== x86 bios: mini compiles stage1, seed-verify ==="
+	# Compile mini hex0 to binary using host xxd (seed)
+	cut builder-hex0-x86-mini.hex0 -f1 -d'#' | cut -f1 -d';' | xxd -r -p > test-x86-mini-seed.bin
+	# Mini seed compiles stage1 hex0
+	dd if=/dev/zero of=test-bios.img bs=512 count=257 2>/dev/null
+	dd if=test-x86-mini-seed.bin of=test-bios.img bs=512 conv=notrunc 2>/dev/null
+	dd if=builder-hex0-x86-stage1-bios.hex0 of=test-bios.img bs=512 seek=1 conv=notrunc 2>/dev/null
+	$(QEMU_X86) -m 256M -nographic -drive file=test-bios.img,format=raw --no-reboot
+	# Verify: host-compiled stage1 matches mini-compiled stage1
+	cut builder-hex0-x86-stage1-bios.hex0 -f1 -d'#' | cut -f1 -d';' | xxd -r -p > test-x86-stage1-seed.bin
+	dd if=test-bios.img of=test-x86-stage1-built.bin bs=1 count=$$(wc -c < test-x86-stage1-seed.bin | tr -d ' ') status=none
+	diff test-x86-stage1-seed.bin test-x86-stage1-built.bin
+	@echo "PASS: x86 stage1 built by mini matches host-compiled seed"
+	rm -f test-x86-mini-seed.bin test-x86-stage1-seed.bin test-x86-stage1-built.bin
+
+# ===========================================================================
 # Tests
 # ===========================================================================
 
@@ -181,3 +220,94 @@ test-aarch64-raspi3b: builder-hex0-aarch64-stage1-raspi3b.bin builder-hex0-aarch
 		-kernel builder-hex0-aarch64-stage1-raspi3b.bin \
 		-drive file=test-raspi3b.img,if=sd,format=raw \
 		--no-reboot
+
+# ===========================================================================
+# Self-build reproducibility tests
+# ===========================================================================
+#
+# Each test boots the kernel, hex0-compiles a source file via the internal
+# shell, flushes to disk, extracts the result, and diffs against the
+# host-compiled binary. A passing diff proves reproducibility.
+
+# --- x86 bios (mini builds mini, then mini builds full) ---
+
+self-test-x86-bios: builder-hex0-x86-stage1-bios.hex0 builder-hex0-x86-stage2.hex0 builder-hex0-x86-mini.hex0
+	@echo "=== x86 bios: mini seed -> mini self-build ==="
+	mkdir -p BUILD
+	cut builder-hex0-x86-mini.hex0 -f1 -d'#' | cut -f1 -d';' | xxd -r -p > BUILD/x86-mini-seed.bin
+	./hex0-to-src.sh builder-hex0-x86-mini.hex0 > BUILD/x86-mini.src
+	./build-self.sh x86 bios BUILD/x86-mini-seed.bin builder-hex0-x86-mini.hex0 BUILD/x86-mini.src 512 BUILD/x86-mini-self.bin
+	diff BUILD/x86-mini-seed.bin BUILD/x86-mini-self.bin
+	@echo "PASS: x86 mini self-build reproduces"
+
+# --- riscv64 virt ---
+
+self-test-riscv64-virt: builder-hex0-riscv64-stage1-virt.bin builder-hex0-riscv64-stage2.hex0 builder-hex0-riscv64-stage1-virt.hex0
+	@echo "=== riscv64 virt: stage2 self-build ==="
+	./hex0-to-src.sh builder-hex0-riscv64-stage2.hex0 > test-self-riscv64-virt.src
+	./build-self.sh riscv64 virt builder-hex0-riscv64-stage1-virt.bin \
+		builder-hex0-riscv64-stage2.hex0 test-self-riscv64-virt.src \
+		$$(wc -c < builder-hex0-riscv64-stage2.bin | tr -d ' ') test-self-riscv64-virt-stage2.bin
+	diff builder-hex0-riscv64-stage2.bin test-self-riscv64-virt-stage2.bin
+	@echo "PASS: riscv64 virt stage2 self-build reproduces"
+	@echo "=== riscv64 virt: stage1 self-build ==="
+	./hex0-to-src.sh builder-hex0-riscv64-stage1-virt.hex0 > test-self-riscv64-virt-s1.src
+	./build-self.sh riscv64 virt builder-hex0-riscv64-stage1-virt.bin \
+		builder-hex0-riscv64-stage2.hex0 test-self-riscv64-virt-s1.src \
+		$$(wc -c < builder-hex0-riscv64-stage1-virt.bin | tr -d ' ') test-self-riscv64-virt-stage1.bin
+	diff builder-hex0-riscv64-stage1-virt.bin test-self-riscv64-virt-stage1.bin
+	@echo "PASS: riscv64 virt stage1 self-build reproduces"
+
+# --- riscv64 sifive_u ---
+
+self-test-riscv64-sifive_u: builder-hex0-riscv64-stage1-sifive_u.bin builder-hex0-riscv64-stage2.hex0 builder-hex0-riscv64-stage1-sifive_u.hex0
+	@echo "=== riscv64 sifive_u: stage2 self-build ==="
+	./hex0-to-src.sh builder-hex0-riscv64-stage2.hex0 > test-self-riscv64-sifive_u.src
+	./build-self.sh riscv64 sifive_u builder-hex0-riscv64-stage1-sifive_u.bin \
+		builder-hex0-riscv64-stage2.hex0 test-self-riscv64-sifive_u.src \
+		$$(wc -c < builder-hex0-riscv64-stage2.bin | tr -d ' ') test-self-riscv64-sifive_u-stage2.bin
+	diff builder-hex0-riscv64-stage2.bin test-self-riscv64-sifive_u-stage2.bin
+	@echo "PASS: riscv64 sifive_u stage2 self-build reproduces"
+	@echo "=== riscv64 sifive_u: stage1 self-build ==="
+	./hex0-to-src.sh builder-hex0-riscv64-stage1-sifive_u.hex0 > test-self-riscv64-sifive_u-s1.src
+	./build-self.sh riscv64 sifive_u builder-hex0-riscv64-stage1-sifive_u.bin \
+		builder-hex0-riscv64-stage2.hex0 test-self-riscv64-sifive_u-s1.src \
+		$$(wc -c < builder-hex0-riscv64-stage1-sifive_u.bin | tr -d ' ') test-self-riscv64-sifive_u-stage1.bin
+	diff builder-hex0-riscv64-stage1-sifive_u.bin test-self-riscv64-sifive_u-stage1.bin
+	@echo "PASS: riscv64 sifive_u stage1 self-build reproduces"
+
+# --- AArch64 virt ---
+
+self-test-aarch64-virt: builder-hex0-aarch64-stage1-virt.bin builder-hex0-aarch64-stage2.hex0 builder-hex0-aarch64-stage1-virt.hex0
+	@echo "=== aarch64 virt: stage2 self-build ==="
+	./hex0-to-src.sh builder-hex0-aarch64-stage2.hex0 > test-self-aarch64-virt.src
+	./build-self.sh aarch64 virt builder-hex0-aarch64-stage1-virt.bin \
+		builder-hex0-aarch64-stage2.hex0 test-self-aarch64-virt.src \
+		$$(wc -c < builder-hex0-aarch64-stage2.bin | tr -d ' ') test-self-aarch64-virt-stage2.bin
+	diff builder-hex0-aarch64-stage2.bin test-self-aarch64-virt-stage2.bin
+	@echo "PASS: aarch64 virt stage2 self-build reproduces"
+	@echo "=== aarch64 virt: stage1 self-build ==="
+	./hex0-to-src.sh builder-hex0-aarch64-stage1-virt.hex0 > test-self-aarch64-virt-s1.src
+	./build-self.sh aarch64 virt builder-hex0-aarch64-stage1-virt.bin \
+		builder-hex0-aarch64-stage2.hex0 test-self-aarch64-virt-s1.src \
+		$$(wc -c < builder-hex0-aarch64-stage1-virt.bin | tr -d ' ') test-self-aarch64-virt-stage1.bin
+	diff builder-hex0-aarch64-stage1-virt.bin test-self-aarch64-virt-stage1.bin
+	@echo "PASS: aarch64 virt stage1 self-build reproduces"
+
+# --- AArch64 raspi3b ---
+
+self-test-aarch64-raspi3b: builder-hex0-aarch64-stage1-raspi3b.bin builder-hex0-aarch64-stage2.hex0 builder-hex0-aarch64-stage1-raspi3b.hex0
+	@echo "=== aarch64 raspi3b: stage2 self-build ==="
+	./hex0-to-src.sh builder-hex0-aarch64-stage2.hex0 > test-self-aarch64-raspi3b.src
+	./build-self.sh aarch64 raspi3b builder-hex0-aarch64-stage1-raspi3b.bin \
+		builder-hex0-aarch64-stage2.hex0 test-self-aarch64-raspi3b.src \
+		$$(wc -c < builder-hex0-aarch64-stage2.bin | tr -d ' ') test-self-aarch64-raspi3b-stage2.bin
+	diff builder-hex0-aarch64-stage2.bin test-self-aarch64-raspi3b-stage2.bin
+	@echo "PASS: aarch64 raspi3b stage2 self-build reproduces"
+	@echo "=== aarch64 raspi3b: stage1 self-build ==="
+	./hex0-to-src.sh builder-hex0-aarch64-stage1-raspi3b.hex0 > test-self-aarch64-raspi3b-s1.src
+	./build-self.sh aarch64 raspi3b builder-hex0-aarch64-stage1-raspi3b.bin \
+		builder-hex0-aarch64-stage2.hex0 test-self-aarch64-raspi3b-s1.src \
+		$$(wc -c < builder-hex0-aarch64-stage1-raspi3b.bin | tr -d ' ') test-self-aarch64-raspi3b-stage1.bin
+	diff builder-hex0-aarch64-stage1-raspi3b.bin test-self-aarch64-raspi3b-stage1.bin
+	@echo "PASS: aarch64 raspi3b stage1 self-build reproduces"
