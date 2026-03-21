@@ -21,12 +21,12 @@ Each architecture uses a **board-specific stage 1** and a **portable stage 2**:
 
 * **Stage 1** (board-specific): Hex0 compiler bootloader. Finds the disk on the
   target platform, reads hex0 source, compiles it to binary, and jumps there
-  with the filesystem start sector and DTB pointer.
+  with the filesystem start sector and storage info (DTB pointer or MMIO base).
 
-* **Stage 2** (per-architecture, ~9-13KB): Portable kernel that works on any
-  supported board for a given architecture. Parses the Flattened Device Tree
-  (FDT) to discover storage devices at runtime. Provides paging, syscalls,
-  process simulation, filesystem, and internal shell.
+* **Stage 2** (per-architecture, ~9-15KB): Portable kernel that works on any
+  supported board for a given architecture. Discovers storage devices via DTB
+  or stage 1 handoff. Provides paging, syscalls, process simulation,
+  filesystem, and internal shell.
 
 The **same stage 2 hex0 source works on every board** within an architecture —
 only stage 1 changes per platform.
@@ -46,6 +46,7 @@ only stage 1 changes per platform.
 | Board | Stage 1 | Storage | QEMU machine |
 |-------|---------|---------|--------------|
 | QEMU virt | `stage1-virt.S` (500 bytes) | VirtIO block | `-machine virt -cpu cortex-a53` |
+| Raspberry Pi 3B | `stage1-raspi3b.S` (1916 bytes) | SDHCI (ARASAN) | `-machine raspi3b` |
 
 
 ## Features
@@ -53,7 +54,7 @@ only stage 1 changes per platform.
 Common to both architectures:
 
 * Two-stage boot: board-specific binary seed + shared hex0 source
-* DTB-driven storage discovery (VirtIO block, SPI+SD on RISC-V)
+* Storage discovery via DTB (VirtIO, SPI+SD) or stage 1 handoff (SDHCI)
 * Disk I/O abstraction via function pointers
 * Virtual memory with gigapage/block mappings
 * 14 Linux-compatible system calls (shared numbering)
@@ -63,13 +64,13 @@ Common to both architectures:
 
 | | RISC-V 64-bit | AArch64 |
 |---|---|---|
-| Stage 2 size | ~9KB (4058 lines) | ~13KB (3621 lines) |
+| Stage 2 size | ~9KB (4058 lines) | ~15KB (4232 lines) |
 | Privilege mode | S-mode under OpenSBI | EL1 (direct) |
-| Paging | Sv39 gigapages | AArch64 L1 block descriptors |
-| Console | SBI putchar | PL011 UART (0x09000000) |
-| Reboot | SBI SRST cold reboot | PSCI SYSTEM_RESET via HVC |
+| Paging | Sv39 gigapages | L1 block descriptors (virt), L1+L2 (raspi3b) |
+| Console | SBI putchar | PL011 UART |
+| Reboot | SBI SRST cold reboot | PSCI HVC (virt) / BCM2835 PM watchdog (raspi3b) |
 | Syscall ABI | ecall, a7 | SVC #0, x8 |
-| RAM base | 0x80000000 | 0x40000000 |
+| RAM base | 0x80000000 | 0x40000000 (virt) / 0x00000000 (raspi3b, 1GB) |
 
 
 ## Building
@@ -91,6 +92,7 @@ make aarch64             # build aarch64 only
 ### AArch64 outputs
 
 * `builder-hex0-aarch64-stage1-virt.bin` — virt stage 1
+* `builder-hex0-aarch64-stage1-raspi3b.bin` — Raspberry Pi 3B stage 1
 * `builder-hex0-aarch64-stage2.hex0` — portable stage 2
 
 
@@ -131,6 +133,14 @@ qemu-system-aarch64 -machine virt -cpu cortex-a53 -m 2G -nographic \
     -kernel builder-hex0-aarch64-stage1-virt.bin \
     -drive file=disk.img,format=raw,if=none,id=hd0 \
     -device virtio-blk-device,drive=hd0 --no-reboot
+```
+
+### AArch64 — Raspberry Pi 3B (SDHCI)
+
+```
+qemu-system-aarch64 -machine raspi3b -serial mon:stdio -nographic \
+    -kernel builder-hex0-aarch64-stage1-raspi3b.bin \
+    -drive file=disk.img,if=sd,format=raw --no-reboot
 ```
 
 ### Disk Layout
@@ -180,20 +190,20 @@ Built-in commands:
 | Aspect | x86 | RISC-V | AArch64 |
 |--------|-----|--------|---------|
 | Boot | MBR/BIOS | QEMU `-kernel` + hex0 on disk | QEMU `-kernel` + hex0 on disk |
-| Binary seed | 192 bytes | 512-756 bytes | 500 bytes |
+| Binary seed | 192 bytes | 512-756 bytes | 500-1916 bytes |
 | Privilege | 32-bit protected mode | S-mode (Sv39) | EL1 (AArch64 paging) |
 | Console | BIOS int 10h | SBI putchar | PL011 UART |
-| Disk | BIOS int 13h | VirtIO or SPI+SD (DTB) | VirtIO (DTB) |
-| Reboot | Triple fault | SBI SRST | PSCI HVC |
-| Stage 2 size | ~4KB | ~9KB | ~13KB |
+| Disk | BIOS int 13h | VirtIO or SPI+SD (DTB) | VirtIO or SDHCI |
+| Reboot | Triple fault | SBI SRST | PSCI HVC / BCM2835 PM |
+| Stage 2 size | ~4KB | ~9KB | ~15KB |
 | Syscall ABI | int 0x80 | ecall (a7) | SVC #0 (x8) |
 
 
 ## Limitations
 
-* Stage 1 is board-specific (RISC-V: virt + sifive_u; AArch64: virt)
+* Stage 1 is board-specific (RISC-V: virt + sifive_u; AArch64: virt + raspi3b)
 * RISC-V sifive_u test requires QEMU >= 10.1
-* Only 8192 files can be created
+* Only 16384 files can be created
 * File names limited to 1024 bytes
 * One child process at a time (fork simulation)
 * Unimplemented syscalls return 0 (success)

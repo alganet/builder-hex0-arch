@@ -23,12 +23,13 @@
 ;   0x50000000  User stack top (VA 0x10000000, grows down)
 ;   0x60000000  Scratch buffer (64KB)
 ;   0x60010000  stdin device buffer (64KB)
-;   0x60020000  File names (8MB, 8192 entries x 1024 bytes)
+;   0x60900000  File names (16MB, 16384 entries x 1024 bytes)
 ;   0x60400000  Process descriptors (16 x 4096)
 ;   0x60820000  File descriptors (512KB, 32768 x 16 bytes)
-;   0x68000000  Kernel stack top (grows down)
-;   0x70000000  Saved process memory (bump allocator)
-;   0x94000000  File data (bump allocator, next_file_address)
+;   0x7B800000  Kernel stack top (grows down)
+;   0x42000000  Preload buffer (8MB, raspi3b only, PA 0x02000000 slow zone)
+;   0x78000000  Saved process memory (bump allocator)
+;   0xA1900000  File data (bump allocator, grows up to 0xBFFFFFFF)
 ;
 ; AArch64 paging (1GB block descriptors, level 1 table):
 ;   Entry 0: VA 0x00000000-0x3FFFFFFF -> PA 0x40000000 (User, Normal memory)
@@ -51,11 +52,13 @@
 ;   +0x050: have_userspace (8 bytes)
 ;   +0x058: cmd_args (3x8: argv[0], argv[1], NULL)
 ;   +0x070: cmd_env (1x8: NULL)
-;   +0x078: (unused)
+;   +0x078: stdin_buf_ptr (8 bytes, preload buffer pointer)
 ;   +0x080: dtb_pointer (8 bytes)
 ;   +0x088: disk_read_fn (8 bytes)
 ;   +0x090: disk_write_fn (8 bytes)
 ;   +0x098: spi_base (8 bytes)
+;   +0x0A0: uart_base (8 bytes)
+;   +0x0A8: board_has_sdhci (8 bytes)
 ;
 ; Process descriptor (4096 bytes each, at 0x60400000):
 ;   +0x000: process_address (8)
@@ -119,7 +122,7 @@
 ;   offset 264: padding (alignment)
 
 :_start
-7C0C0014  # b main
+6D080014  # b _trampoline
 
 ;============================================================
 ; Exception vector table (must be 2KB aligned)
@@ -129,55 +132,55 @@
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 2048 (2044 bytes padding)
 :exception_vectors
     ; Current EL with SP_EL0 - Synchronous
-B4050014  # b reboot
+FF050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - IRQ
-94050014  # b reboot
+DF050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - FIQ
-74050014  # b reboot
+BF050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - SError
-54050014  # b reboot
+9F050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
 
     ; Current EL with SP_ELx - Synchronous
-34050014  # b reboot
+7F050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - IRQ
-14050014  # b reboot
+5F050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - FIQ
-F4040014  # b reboot
+3F050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - SError
-D4040014  # b reboot
+1F050014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch64 - Synchronous (SVC handler) - offset 0x400
 00010014  # b trap_handler
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - IRQ
-94040014  # b reboot
+DF040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - FIQ
-74040014  # b reboot
+BF040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - SError
-54040014  # b reboot
+9F040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch32 - Synchronous
-34040014  # b reboot
+7F040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - IRQ
-14040014  # b reboot
+5F040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - FIQ
-F4030014  # b reboot
+3F040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - SError
-D4030014  # b reboot
+1F040014  # b reboot
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  # .align 128 (124 bytes padding)
 
 ;============================================================
@@ -235,17 +238,47 @@ E98300F9  # str x9, [sp, #256]
 095238D5  # mrs x9, esr_el1
 29FD5AD3  # lsr x9, x9, #26
 3F5500F1  # cmp x9, #0x15
-80000054  # b.eq dispatch
+60040054  # b.eq dispatch
 
-    ; Not SVC: terminate process with exit code 139 (like SIGSEGV)
+    ; Not SVC: print crash info and terminate with exit code 139
+145238D5  # mrs x20, esr_el1
+354038D5  # mrs x21, elr_el1
+166038D5  # mrs x22, far_el1
+174138D5  # mrs x23, sp_el0
+200480D2  # mov x0, #0x21 # '!'
+80030094  # bl uart_putchar
+80FE5AD3  # lsr x0, x20, #26 # exception class
+91030094  # bl print_hex_byte
+400780D2  # mov x0, #0x3A
+7C030094  # bl uart_putchar
+E00315AA  # mov x0, x21 # ELR
+9B030094  # bl print_hex32
+000880D2  # mov x0, #0x40 # '@'
+78030094  # bl uart_putchar
+E00316AA  # mov x0, x22 # FAR
+97030094  # bl print_hex32
+800580D2  # mov x0, #0x2C # ','
+74030094  # bl uart_putchar
+E00317AA  # mov x0, x23 # SP_EL0
+93030094  # bl print_hex32
+800580D2  # mov x0, #0x2C # ','
+70030094  # bl uart_putchar
+E07B40F9  # ldr x0, [sp, #240] # x30 from trap frame
+8F030094  # bl print_hex32
+800580D2  # mov x0, #0x2C # ','
+6C030094  # bl uart_putchar
+0906A8D2  # movz x9, #0x4030, lsl #16
+200D40F9  # ldr x0, [x9, #0x18] # next_file_address
+8A030094  # bl print_hex32
+400180D2  # mov x0, #0x0A
+67030094  # bl uart_putchar
 691180D2  # mov x9, #139
 E90300F9  # str x9, [sp, #0]
-FE020014  # b syscall_exit
+23030014  # b syscall_exit
 
 ; Dispatch syscall based on x8
 :dispatch
 E82340F9  # ldr x8, [sp, #64]
-
 1F0101F1  # cmp x8, #64
 E0040054  # b.eq tramp_write
 1F7501F1  # cmp x8, #93
@@ -284,7 +317,6 @@ A0020054  # b.eq tramp_stub
 1FD500F1  # cmp x8, #53
 60020054  # b.eq tramp_stub
 
-    ; Unknown syscall
 09008092  # movn x9, #0
 E90300F9  # str x9, [sp, #0]
 11000014  # b trap_exit
@@ -293,7 +325,7 @@ E90300F9  # str x9, [sp, #0]
 :tramp_write
 37000014  # b syscall_write
 :tramp_exit
-D3020014  # b syscall_exit
+F8020014  # b syscall_exit
 :tramp_brk
 66000014  # b syscall_brk
 :tramp_read
@@ -307,21 +339,21 @@ BA000014  # b syscall_openat
 :tramp_chdir
 28010014  # b syscall_chdir
 :tramp_getcwd
-4D010014  # b syscall_getcwd
+52010014  # b syscall_getcwd
 :tramp_faccessat
-6F010014  # b syscall_faccessat
+74010014  # b syscall_faccessat
 :tramp_mkdirat
-7B010014  # b syscall_mkdirat
+80010014  # b syscall_mkdirat
 :tramp_clone
-B3010014  # b syscall_clone
+B8010014  # b syscall_clone
 :tramp_execve
-FA010014  # b syscall_execve
+11020014  # b syscall_execve
 :tramp_waitid
-F3020014  # b syscall_waitid
+18030014  # b syscall_waitid
 :tramp_wait4
-FC020014  # b syscall_wait4
+21030014  # b syscall_wait4
 :tramp_stub
-AD010014  # b syscall_stub_zero
+B2010014  # b syscall_stub_zero
 
 ;============================================================
 ; trap_exit: Restore all registers and eret
@@ -403,7 +435,7 @@ BF0E00F1  # cmp x21, #3
 :write_loop
 D70000B4  # cbz x23, write_done
 C0024039  # ldrb w0, [x22]
-D3020094  # bl uart_putchar
+F8020094  # bl uart_putchar
 D6060091  # add x22, x22, #1
 F70600D1  # sub x23, x23, #1
 FBFFFF17  # b write_loop
@@ -416,7 +448,7 @@ C9FFFF17  # b trap_exit
     ; x21=fd, x22=buf, x23=count, x24=original count
     ; Get file info from process fd table
 E00315AA  # mov x0, x21
-FD030094  # bl fd_to_file_index
+9B040094  # bl fd_to_file_index
 F90300AA  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -427,7 +459,7 @@ F90300AA  # mov x25, x0 # x25 = global file index
 5C0740F9  # ldr x28, [x26, #8] # file_length
 
     ; Get current_offset from process fd
-68030094  # bl get_process_base
+06040094  # bl get_process_base
 00000891  # add x0, x0, #0x200
 A9F27DD3  # lsl x9, x21, #3
 1300098B  # add x19, x0, x9 # x19 = &open_files[fd]
@@ -545,7 +577,7 @@ D50300B5  # cbnz x21, read_file # if fd != 0, read from file
     ; Read next sector
 E0030AAA  # mov x0, x10 # sector number
 2100ACD2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
-A6040094  # bl disk_read_sector
+44050094  # bl disk_read_sector
     ; Advance sector, reset offset
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A1940F9  # ldr x10, [x9, #0x30]
@@ -581,7 +613,7 @@ F80300F9  # str x24, [sp, #0] # return original count
     ; x21=fd, x22=buf, x23=count
     ; Get file info from process fd table
 E00315AA  # mov x0, x21
-A3030094  # bl fd_to_file_index
+41040094  # bl fd_to_file_index
 F90300AA  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -592,7 +624,7 @@ F90300AA  # mov x25, x0 # x25 = global file index
 3B0540F9  # ldr x27, [x9, #8] # file_length
 
     ; Get current_offset from process fd
-0E030094  # bl get_process_base
+AC030094  # bl get_process_base
 00000891  # add x0, x0, #0x200
 A9F27DD3  # lsl x9, x21, #3
 1C00098B  # add x28, x0, x9 # x28 = &open_files[fd]
@@ -640,7 +672,7 @@ B502098B  # add x21, x21, x9
 
     ; Resolve to absolute path
 E00315AA  # mov x0, x21
-FC020094  # bl absolute_path
+9A030094  # bl absolute_path
 F50300AA  # mov x21, x0 # x21 = absolute path in scratch buffer
 
     ; Check O_CREAT (bit 6 = 0x40)
@@ -649,7 +681,7 @@ E90000B5  # cbnz x9, openat_create
 
     ; Open existing file
 E00315AA  # mov x0, x21
-62030094  # bl find_file
+00040094  # bl find_file
 1F0000F1  # cmp x0, #0
 EB070054  # b.lt openat_fail
 F70300AA  # mov x23, x0 # x23 = file index
@@ -681,7 +713,7 @@ F9030AAA  # mov x25, x10 # save slash position
 38034039  # ldrb w24, [x25]
 3F030039  # strb wzr, [x25]
 E00315AA  # mov x0, x21
-4E030094  # bl find_file
+EC030094  # bl find_file
 38030039  # strb w24, [x25] # restore slash
 1F0000F1  # cmp x0, #0
 4B050054  # b.lt openat_fail
@@ -692,8 +724,8 @@ E00315AA  # mov x0, x21
 370940F9  # ldr x23, [x9, #0x10] # x23 = next_filenum (our new file index)
 
     ; Copy filename to file names table
-    ; dest = 0x60020000 + x23 * 1024
-4A00ACD2  # movz x10, #0x6002, lsl #16
+    ; dest = 0x60900000 + x23 * 1024
+0A12ACD2  # movz x10, #0x6090, lsl #16
 EBD676D3  # lsl x11, x23, #10
 4A010B8B  # add x10, x10, x11 # destination
 EB0315AA  # mov x11, x21 # source
@@ -728,7 +760,7 @@ EAEE7CD3  # lsl x10, x23, #4
 
 :openat_alloc_fd
     ; Allocate a process fd slot (start from fd 4)
-BF020094  # bl get_process_base
+5D030094  # bl get_process_base
 00000891  # add x0, x0, #0x200 # open_files array
 890080D2  # mov x9, #4 # start fd
 0A3880D2  # mov x10, #448 # max entries
@@ -762,7 +794,7 @@ E90300F9  # str x9, [sp, #0]
 :syscall_close
 F50340F9  # ldr x21, [sp, #0]
 
-AB020094  # bl get_process_base
+49030094  # bl get_process_base
 00000891  # add x0, x0, #0x200 # open_files
 A9F27DD3  # lsl x9, x21, #3
 0000098B  # add x0, x0, x9
@@ -780,7 +812,7 @@ F50340F9  # ldr x21, [sp, #0] # fd
 F60740F9  # ldr x22, [sp, #8] # offset
 F70B40F9  # ldr x23, [sp, #16] # whence
 
-A1020094  # bl get_process_base
+3F030094  # bl get_process_base
 00000891  # add x0, x0, #0x200
 A9F27DD3  # lsl x9, x21, #3
 1800098B  # add x24, x0, x9 # x24 = &open_files[fd]
@@ -827,12 +859,20 @@ B502098B  # add x21, x21, x9
 
     ; Resolve to absolute path
 E00315AA  # mov x0, x21
-8C020094  # bl absolute_path
+2A030094  # bl absolute_path
 F50300AA  # mov x21, x0
 
+    ; Special case: "/" always exists (skip find_file)
+A9024039  # ldrb w9, [x21]
+3FBD00F1  # cmp w9, #0x2F
+61000054  # b.ne chdir_find
+A9064039  # ldrb w9, [x21, #1]
+490100B4  # cbz w9, chdir_copy_path # "/" alone -> skip find_file
+
+:chdir_find
     ; Find the file
 E00315AA  # mov x0, x21
-F4020094  # bl find_file
+8D030094  # bl find_file
 1F0000F1  # cmp x0, #0
 4B030054  # b.lt chdir_fail
 
@@ -843,8 +883,9 @@ F4020094  # bl find_file
 2A0540F9  # ldr x10, [x9, #8] # file_length
 AA0200B5  # cbnz x10, chdir_fail # not a directory
 
+:chdir_copy_path
     ; Copy path to process current_dir
-7A020094  # bl get_process_base
+13030094  # bl get_process_base
 16000491  # add x22, x0, #0x100 # dest = proc->current_dir
 
 E90315AA  # mov x9, x21 # source
@@ -869,12 +910,12 @@ EB0580D2  # mov w11, #0x2F
 5F010039  # strb wzr, [x10]
 :chdir_ok
 FF0300F9  # str xzr, [sp, #0] # return 0
-BFFEFF17  # b trap_exit
+BAFEFF17  # b trap_exit
 
 :chdir_fail
 09008092  # movn x9, #0
 E90300F9  # str x9, [sp, #0]
-BCFEFF17  # b trap_exit
+B7FEFF17  # b trap_exit
 
 ;============================================================
 ; syscall_getcwd: getcwd(buf, size) -> buf or -1
@@ -888,7 +929,7 @@ F60740F9  # ldr x22, [sp, #8] # size
 0900A8D2  # movz x9, #0x4000, lsl #16
 B502098B  # add x21, x21, x9
 
-5F020094  # bl get_process_base
+F8020094  # bl get_process_base
 00000491  # add x0, x0, #0x100 # current_dir
 E90300AA  # mov x9, x0 # src
 EA0315AA  # mov x10, x21 # dest
@@ -930,7 +971,7 @@ FBFFFF17  # b getcwd_copy
 0900A8D2  # movz x9, #0x4000, lsl #16
 A90209CB  # sub x9, x21, x9 # VA = PA - 0x40000000
 E90300F9  # str x9, [sp, #0] # return buf (VA)
-99FEFF17  # b trap_exit
+94FEFF17  # b trap_exit
 
 ;============================================================
 ; syscall_faccessat: faccessat(dirfd, pathname, mode, flags)
@@ -945,17 +986,17 @@ F50740F9  # ldr x21, [sp, #8] # pathname (x1, VA)
 B502098B  # add x21, x21, x9
 
 E00315AA  # mov x0, x21
-43020094  # bl absolute_path
-AD020094  # bl find_file
+DC020094  # bl absolute_path
+46030094  # bl find_file
 
 1F0000F1  # cmp x0, #0
 6B000054  # b.lt faccessat_fail
 FF0300F9  # str xzr, [sp, #0] # return 0
-8FFEFF17  # b trap_exit
+8AFEFF17  # b trap_exit
 :faccessat_fail
 09008092  # movn x9, #0
 E90300F9  # str x9, [sp, #0]
-8CFEFF17  # b trap_exit
+87FEFF17  # b trap_exit
 
 ;============================================================
 ; syscall_mkdirat: mkdirat(dirfd, pathname, mode)
@@ -971,7 +1012,7 @@ B502098B  # add x21, x21, x9
 
     ; Resolve to absolute path
 E00315AA  # mov x0, x21
-36020094  # bl absolute_path
+CF020094  # bl absolute_path
 F50300AA  # mov x21, x0
 
     ; Check parent directory exists (find last '/')
@@ -995,7 +1036,7 @@ F9030AAA  # mov x25, x10 # save slash position
 38034039  # ldrb w24, [x25]
 3F030039  # strb wzr, [x25]
 E00315AA  # mov x0, x21
-90020094  # bl find_file
+29030094  # bl find_file
 38030039  # strb w24, [x25] # restore slash
 1F0000F1  # cmp x0, #0
 8B030054  # b.lt mkdirat_fail
@@ -1006,7 +1047,7 @@ E00315AA  # mov x0, x21
 370940F9  # ldr x23, [x9, #0x10] # next_filenum
 
     ; Copy name to file names table
-4A00ACD2  # movz x10, #0x6002, lsl #16 # 0x60020000
+0A12ACD2  # movz x10, #0x6090, lsl #16 # 0x60900000
 EBD676D3  # lsl x11, x23, #10
 4A010B8B  # add x10, x10, x11
 EB0315AA  # mov x11, x21
@@ -1037,19 +1078,19 @@ EAEE7CD3  # lsl x10, x23, #4
 4B0900F9  # str x11, [x10, #0x10]
 
 FF0300F9  # str xzr, [sp, #0] # return 0
-58FEFF17  # b trap_exit
+53FEFF17  # b trap_exit
 
 :mkdirat_fail
 09008092  # movn x9, #0
 E90300F9  # str x9, [sp, #0]
-55FEFF17  # b trap_exit
+50FEFF17  # b trap_exit
 
 ;============================================================
 ; syscall_stub_zero: Return 0 for unimplemented stubs
 ;============================================================
 :syscall_stub_zero
 FF0300F9  # str xzr, [sp, #0]
-53FEFF17  # b trap_exit
+4EFEFF17  # b trap_exit
 
 ;============================================================
 ; syscall_clone: clone/fork simulation
@@ -1058,7 +1099,7 @@ FF0300F9  # str xzr, [sp, #0]
 ;============================================================
 :syscall_clone
     ; Get current process descriptor
-FA010094  # bl get_process_base
+93020094  # bl get_process_base
 F50300AA  # mov x21, x0 # x21 = proc base
 
     ; Save brk to saved_brk (+0x28)
@@ -1076,7 +1117,7 @@ A91240F9  # ldr x9, [x21, #0x20]
 A91200F9  # str x9, [x21, #0x20]
 
     ; Save stack: copy from sp to kernel_stack_top (0x68000000)
-0900ADD2  # movz x9, #0x6800, lsl #16 # x9 = 0x68000000 (stack top)
+0970AFD2  # movz x9, #0x7B80, lsl #16 # x9 = 0x7B800000 (stack top)
 EA030091  # mov x10, sp # x10 = current sp (can't use sp directly in sub reg)
 2A010ACB  # sub x10, x9, x10 # x10 = stack length
 
@@ -1085,7 +1126,7 @@ EA030091  # mov x10, sp # x10 = current sp (can't use sp directly in sub reg)
 361540F9  # ldr x22, [x9, #0x28] # next_save_process_address
 B62600F9  # str x22, [x21, #0x48] # save stack save address
 
-0900ADD2  # movz x9, #0x6800, lsl #16
+0970AFD2  # movz x9, #0x7B80, lsl #16
 EA030091  # mov x10, sp
 2A010ACB  # sub x10, x9, x10 # stack length
 AA2A00F9  # str x10, [x21, #0x50] # save stack length
@@ -1094,7 +1135,7 @@ AA2A00F9  # str x10, [x21, #0x50] # save stack length
 E00316AA  # mov x0, x22 # dest = save area
 E1030091  # mov x1, sp # src = current sp
 E2030AAA  # mov x2, x10 # len
-96010094  # bl memcpy
+CA010094  # bl memcpy
 
     ; Advance next_save_process_address
 0906A8D2  # movz x9, #0x4030, lsl #16
@@ -1120,7 +1161,7 @@ A22200F9  # str x2, [x21, #0x40] # saved_process_mem_len
     ; Copy process memory
 E00319AA  # mov x0, x25 # dest
 E10317AA  # mov x1, x23 # src = process_address (PA)
-85010094  # bl memcpy
+B9010094  # bl memcpy
 
     ; Advance next_save_process_address
 0906A8D2  # movz x9, #0x4030, lsl #16
@@ -1158,7 +1199,7 @@ B83200F9  # str x24, [x21, #0x60] # saved_user_stack_len
 E00319AA  # mov x0, x25 # dest
 E10317AA  # mov x1, x23 # src = user sp (PA)
 E20318AA  # mov x2, x24 # len
-6C010094  # bl memcpy
+A0010094  # bl memcpy
 
     ; Advance next_save_process_address
 0906A8D2  # movz x9, #0x4030, lsl #16
@@ -1166,9 +1207,32 @@ E20318AA  # mov x2, x24 # len
 4A01188B  # add x10, x10, x24
 2A1500F9  # str x10, [x9, #0x28]
 
+    ; Copy CWD from parent proc to child proc
+    ; Parent = proc[next_process_num-1], Child will be proc[next_process_num]
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1140F9  # ldr x10, [x9, #0x20] # next_process_num
+0908ACD2  # movz x9, #0x6040, lsl #16
+0B0082D2  # movz x11, #0x1000
+4C7D0B9B  # mul x12, x10, x11 # child offset = next_process_num * 4096
+4D0500D1  # sub x13, x10, #1
+AD7D0B9B  # mul x13, x13, x11 # parent offset = (next_process_num-1) * 4096
+2C010C8B  # add x12, x9, x12 # child proc base
+2D010D8B  # add x13, x9, x13 # parent proc base
+    ; Copy 256 bytes of CWD (offset +0x100)
+8C010491  # add x12, x12, #0x100 # child CWD
+AD010491  # add x13, x13, #0x100 # parent CWD
+0E2080D2  # mov x14, #256
+:clone_copy_cwd
+AF014039  # ldrb w15, [x13]
+8F010039  # strb w15, [x12]
+AD050091  # add x13, x13, #1
+8C050091  # add x12, x12, #1
+CE0500D1  # sub x14, x14, #1
+6EFFFFB5  # cbnz x14, clone_copy_cwd
+
     ; Return 0 (child return from fork)
 FF0300F9  # str xzr, [sp, #0]
-0BFEFF17  # b trap_exit
+F4FDFF17  # b trap_exit
 
 ;============================================================
 ; syscall_execve: execve(pathname, argv, envp)
@@ -1179,14 +1243,34 @@ F50340F9  # ldr x21, [sp, #0] # pathname (VA)
 F60740F9  # ldr x22, [sp, #8] # argv (VA)
 F70B40F9  # ldr x23, [sp, #16] # envp (VA)
 
-    ; Translate all pointers VA -> PA
+    ; Translate all pointers VA -> PA (add 0x40000000 for Entry 1 kernel VA)
 0900A8D2  # movz x9, #0x4000, lsl #16
 B502098B  # add x21, x21, x9
 D602098B  # add x22, x22, x9
 F702098B  # add x23, x23, x9
 
+    ; Copy pathname to safe buffer at 0x60000400 (won't be zeroed by memset)
+    ; User memory at PA 0x00600000+ gets zeroed during execve, destroying pathname
+E90315AA  # mov x9, x21 # src = pathname (kernel VA)
+0A00ACD2  # movz x10, #0x6000, lsl #16
+0A8080F2  # movk x10, #0x0400 # dest = 0x60000400 (scratch+0x400)
+0B8080D2  # mov x11, #1024 # max copy length safety limit
+:execve_copy_path
+2C014039  # ldrb w12, [x9]
+4C010039  # strb w12, [x10]
+29050091  # add x9, x9, #1
+4A050091  # add x10, x10, #1
+8C0000B4  # cbz w12, execve_copy_done
+6B0500D1  # sub x11, x11, #1
+4BFFFFB5  # cbnz x11, execve_copy_path
+5F010039  # strb wzr, [x10] # NUL-terminate if max length reached
+:execve_copy_done
+    ; x21 now points to safe copy
+1500ACD2  # movz x21, #0x6000, lsl #16
+158080F2  # movk x21, #0x0400
+
     ; Check if current process forked
-AB010094  # bl get_process_base
+24020094  # bl get_process_base
 F80300AA  # mov x24, x0 # current proc
 091340F9  # ldr x9, [x24, #0x20] # forked flag
 690100B5  # cbnz x9, execve_forked
@@ -1232,7 +1316,6 @@ CA0000B4  # cbz x10, execve_counted
 29210091  # add x9, x9, #8
 FAFFFF17  # b execve_count_args
 :execve_counted
-
     ; String storage on user stack, growing DOWN from PA 0x50000000.
 1B00AAD2  # movz x27, #0x5000, lsl #16 # x27 = 0x50000000 (string storage PA)
 
@@ -1260,7 +1343,7 @@ EA0100B4  # cbz x10, execve_argv_done
     ; Copy string from x1 to x27 (256 bytes max)
 E0031BAA  # mov x0, x27 # dest (PA)
 022080D2  # mov x2, #256
-32010094  # bl memcpy
+46010094  # bl memcpy
 
     ; Calculate VA for this string: VA = PA - 0x40000000
 0A00A8D2  # movz x10, #0x4000, lsl #16
@@ -1301,7 +1384,7 @@ E2010054  # b.hs execve_envp_done # out of valid VA range
 7B0304D1  # sub x27, x27, #256
 E0031BAA  # mov x0, x27 # dest (PA)
 022080D2  # mov x2, #256
-19010094  # bl memcpy
+2D010094  # bl memcpy
 
 0A00A8D2  # movz x10, #0x4000, lsl #16
 6A030ACB  # sub x10, x27, x10 # VA
@@ -1374,11 +1457,11 @@ F9FFFF17  # b execve_push_argv
 
     ; --- Load ELF ---
     ; Resolve program name
-E00315AA  # mov x0, x21 # pathname
-3F010094  # bl absolute_path
+E00315AA  # mov x0, x21
+B8010094  # bl absolute_path
 F50300AA  # mov x21, x0
 E00315AA  # mov x0, x21
-A7010094  # bl find_file
+20020094  # bl find_file
 1F0000F1  # cmp x0, #0
 8B090054  # b.lt execve_fail
 FB0300AA  # mov x27, x0 # x27 = file index
@@ -1397,7 +1480,7 @@ FB0300AA  # mov x27, x0 # x27 = file index
 2A1100F9  # str x10, [x9, #0x20]
 
     ; Get new process descriptor
-28010094  # bl get_process_base
+A1010094  # bl get_process_base
 F80300AA  # mov x24, x0 # x24 = new proc descriptor
 
     ; Copy cwd from previous process
@@ -1419,7 +1502,7 @@ FAFFFF17  # b execve_copy_cwd
     ; Clear new process open file descriptors
 00030891  # add x0, x24, #0x200
 01C081D2  # movz x1, #0xE00
-C5000094  # bl memset_zero
+D9000094  # bl memset_zero
 
     ; Parse 64-bit ELF header
 950F40F9  # ldr x21, [x28, #0x18] # entry point (VA)
@@ -1429,10 +1512,11 @@ C5000094  # bl memset_zero
 
 97734079  # ldrh w23, [x28, #0x38] # e_phnum
 
-    ; Zero user process area: 2MB starting at PA 0x40600000
+    ; Zero user process area: 8MB starting at PA 0x40600000
+    ; Must clear beyond 2MB to zero stale heap data from previous processes
 000CA8D2  # movz x0, #0x4060, lsl #16
-0104A0D2  # movz x1, #0x20, lsl #16 # 0x200000 = 2MB
-BE000094  # bl memset_zero
+0110A0D2  # movz x1, #0x80, lsl #16 # 0x800000 = 8MB
+D2000094  # bl memset_zero
 
     ; Reset brk to process base
 090CA8D2  # movz x9, #0x4060, lsl #16
@@ -1456,7 +1540,7 @@ C90A40F9  # ldr x9, [x22, #0x10] # p_vaddr (VA)
 20010A8B  # add x0, x9, x10 # dest = PA = VA + 0x40000000
 
 C21240F9  # ldr x2, [x22, #0x20] # p_filesz
-B6000094  # bl memcpy
+CA000094  # bl memcpy
 
     ; Track end of loaded segments for brk
 C90A40F9  # ldr x9, [x22, #0x10] # p_vaddr
@@ -1509,7 +1593,7 @@ E0039FD6  # eret
 :execve_fail
 09008092  # movn x9, #0
 E90300F9  # str x9, [sp, #0]
-3DFDFF17  # b trap_exit
+18FDFF17  # b trap_exit
 
 ;============================================================
 ; syscall_exit: exit(code)
@@ -1541,7 +1625,7 @@ D51A00F9  # str x21, [x22, #0x30]
 C00240F9  # ldr x0, [x22, #0] # dest = process_address (PA)
 C11E40F9  # ldr x1, [x22, #0x38] # src = saved_process_mem_addr
 C22240F9  # ldr x2, [x22, #0x40] # len = saved_process_mem_len
-88000094  # bl memcpy
+9C000094  # bl memcpy
 
     ; Deallocate save area
 0906A8D2  # movz x9, #0x4030, lsl #16
@@ -1560,7 +1644,7 @@ C90E40F9  # ldr x9, [x22, #0x18] # saved_stack_pointer_fork
 C12640F9  # ldr x1, [x22, #0x48] # src = saved stack addr
 E0030091  # mov x0, sp # dest = sp
 C22A40F9  # ldr x2, [x22, #0x50] # len = saved stack len
-7D000094  # bl memcpy
+91000094  # bl memcpy
 
     ; Restore parent user stack
     ; Compute dest from saved length: dest = 0x50000000 - saved_user_stack_len
@@ -1568,7 +1652,7 @@ C22A40F9  # ldr x2, [x22, #0x50] # len = saved stack len
 C23240F9  # ldr x2, [x22, #0x60] # len = saved_user_stack_len
 000002CB  # sub x0, x0, x2 # dest = stack top - len (= original save start)
 C12E40F9  # ldr x1, [x22, #0x58] # src = saved_user_stack_addr
-78000094  # bl memcpy
+8C000094  # bl memcpy
 
     ; Flush I-cache after restoring parent code/data
 1F7508D5  # ic iallu
@@ -1578,7 +1662,7 @@ DF3F03D5  # isb
     ; Return 1 (parent return from fork)
 290080D2  # mov x9, #1
 E90300F9  # str x9, [sp, #0] # x0 = 1 in trap frame
-17FDFF17  # b trap_exit
+F2FCFF17  # b trap_exit
 
 :exit_to_shell
     ; Restore kernel sp from proc[1]+0x10
@@ -1589,13 +1673,13 @@ E90300F9  # str x9, [sp, #0] # x0 = 1 in trap frame
 3F010091  # mov sp, x9
 
     ; Jump to shell_return
-F6040014  # b shell_return
+99050014  # b shell_return
 
 ;============================================================
 ; syscall_waitid: waitid(idtype, id, infop, options, ...)
 ;============================================================
 :syscall_waitid
-B8000094  # bl get_process_base
+31010094  # bl get_process_base
 091840F9  # ldr x9, [x0, #0x30] # child_exit_code
 
     ; a2 = infop (VA)
@@ -1612,14 +1696,14 @@ AA0000B4  # cbz x10, waitid_no_write
 
 :waitid_no_write
 FF0300F9  # str xzr, [sp, #0] # return 0
-07FDFF17  # b trap_exit
+E2FCFF17  # b trap_exit
 
 ;============================================================
 ; syscall_wait4: wait4(pid, wstatus, options, rusage)
 ; x0(0)=pid, x1(8)=wstatus_ptr
 ;============================================================
 :syscall_wait4
-AE000094  # bl get_process_base
+27010094  # bl get_process_base
 091840F9  # ldr x9, [x0, #0x30] # child_exit_code
 
     ; Get wstatus pointer (x1)
@@ -1638,19 +1722,29 @@ AA0000B4  # cbz x10, wait4_no_write
     ; Return child pid (1)
 290080D2  # mov x9, #1
 E90300F9  # str x9, [sp, #0]
-FCFCFF17  # b trap_exit
+D7FCFF17  # b trap_exit
 
 ;============================================================
 ; uart_putchar: Print character in x0 via PL011 UART
 ; x0 = character to print
 ;============================================================
 :uart_putchar
-0920B9D2  # movz x9, #0xC900, lsl #16 # VA 0xC9000000 -> PA 0x09000000 via Entry 3
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+0906A8D2  # movz x9, #0x4030, lsl #16
+295140F9  # ldr x9, [x9, #0xA0]
 :uart_wait
-2A1940B9  # ldr w10, [x9, #0x18] # FR register (flags)
+07000094  # bl uart_read_fr # bl/ret breaks TCG translation block
 4A017B92  # and w10, w10, #0x20 # bit 5 = TXFF (TX FIFO full)
 CAFFFFB5  # cbnz w10, uart_wait
 20010039  # strb w0, [x9] # write to DR
+FE0340F9  # ldr x30, [sp]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+; uart_read_fr: Read PL011 FR register (breaks TCG TB caching)
+:uart_read_fr
+2A1940B9  # ldr w10, [x9, #0x18]
 C0035FD6  # ret
 
 ;============================================================
@@ -1660,10 +1754,10 @@ C0035FD6  # ret
 1F2800F1  # cmp x0, #10
 6A000054  # b.ge print_hex_alpha
 00C00091  # add x0, x0, #0x30
-F7FFFF17  # b uart_putchar
+F0FFFF17  # b uart_putchar
 :print_hex_alpha
 005C0191  # add x0, x0, #0x57
-F5FFFF17  # b uart_putchar
+EEFFFF17  # b uart_putchar
 
 ;============================================================
 ; print_hex_byte: Print byte in x0 as 2 hex digits
@@ -1734,7 +1828,7 @@ F30300AA  # mov x19, x0
 :print_string_loop
 60024039  # ldrb w0, [x19]
 800000B4  # cbz w0, print_string_done
-C0FFFF97  # bl uart_putchar
+B9FFFF97  # bl uart_putchar
 73060091  # add x19, x19, #1
 FCFFFF17  # b print_string_loop
 :print_string_done
@@ -1761,9 +1855,30 @@ C0035FD6  # ret
 ; reboot: PSCI SYSTEM_RESET via HVC
 ;============================================================
 :reboot
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A5540F9  # ldr x10, [x9, #0xA8] # board_has_sdhci?
+AA0000B5  # cbnz x10, reboot_raspi
+
+    ; Virt: PSCI SYSTEM_RESET via HVC
 200180D2  # movz x0, #0x0009
 0080B0F2  # movk x0, #0x8400, lsl #16 # 0x84000009 = PSCI SYSTEM_RESET
 020000D4  # hvc #0
+0A000014  # b reboot_hang
+
+:reboot_raspi
+    ; Raspi3b: BCM2835 PM watchdog reset
+09E2AFD2  # movz x9, #0x7F10, lsl #16 # PM base VA = 0x7F100000 (PA 0x3F100000)
+    ; Set PM_RSTS to 0 (reset, not poweroff)
+0A40ABD2  # movz x10, #0x5A00, lsl #16 # PM_PASSWORD
+2A2100B9  # str w10, [x9, #0x20] # PM_RSTS = password | 0
+    ; Set PM_WDOG timeout
+0A40ABD2  # movz x10, #0x5A00, lsl #16
+4A0180F2  # movk x10, #0x000A # PM_PASSWORD | 10 ticks
+2A2500B9  # str w10, [x9, #0x24] # PM_WDOG
+    ; Trigger full reset
+0A40ABD2  # movz x10, #0x5A00, lsl #16
+0A0480F2  # movk x10, #0x0020 # PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET
+2A1D00B9  # str w10, [x9, #0x1C] # PM_RSTC
 :reboot_hang
 5F2003D5  # wfe
 FFFFFF17  # b reboot_hang
@@ -1821,29 +1936,59 @@ F30700F9  # str x19, [sp, #8]
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A1D40F9  # ldr x10, [x9, #0x38] # stdin_offset
 
-    ; If offset >= 512, read next sector
-5F0108F1  # cmp x10, #512
-4B010054  # b.lt rsb_have_data
+    ; Check if pre-loaded buffer exists (raspi3b uses CMD18 preload)
+2B3D40F9  # ldr x11, [x9, #0x78] # stdin_buf_ptr (0 if no preload)
+EB0100B4  # cbz x11, rsb_per_sector
 
-    ; Read next sector into stdin buffer at 0x60010000
+    ; --- Pre-loaded path (raspi3b) ---
+    ; If offset >= 512, advance to next sector in pre-loaded buffer
+5F0108F1  # cmp x10, #512
+8B030054  # b.lt rsb_have_data
+6B010891  # add x11, x11, #512
+    ; Check if past preload end (0x42000000 + 16128*512 = 0x427E0000)
+CC4FA8D2  # movz x12, #0x427E, lsl #16
+7F010CEB  # cmp x11, x12
+A2000054  # b.hs rsb_preload_exhausted
+2B3D00F9  # str x11, [x9, #0x78]
+3F1D00F9  # str xzr, [x9, #0x38]
+0A0080D2  # mov x10, #0
+14000014  # b rsb_have_data
+
+:rsb_preload_exhausted
+    ; Switch from preload buffer to per-sector SDHCI reads
+3F3D00F9  # str xzr, [x9, #0x78] # stdin_buf_ptr = 0
+0A4080D2  # mov x10, #512
+2A1D00F9  # str x10, [x9, #0x38] # stdin_offset = 512 (trigger sector read)
+01000014  # b rsb_per_sector
+
+:rsb_per_sector
+    ; --- Per-sector path (virt or post-preload fallback) ---
+5F0108F1  # cmp x10, #512
+4B010054  # b.lt rsb_have_data_sector
+    ; Read next sector via disk_read_sector
 201940F9  # ldr x0, [x9, #0x30] # sector number
 2100ACD2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
-B4010094  # bl disk_read_sector
-
-    ; Advance sector, reset offset
+09020094  # bl disk_read_sector
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A1940F9  # ldr x10, [x9, #0x30]
 4A050091  # add x10, x10, #1
 2A1900F9  # str x10, [x9, #0x30] # stdin_sector++
 3F1D00F9  # str xzr, [x9, #0x38] # stdin_offset = 0
 0A0080D2  # mov x10, #0
-
-:rsb_have_data
-    ; Read one byte from stdin buffer
+:rsb_have_data_sector
 3300ACD2  # movz x19, #0x6001, lsl #16
 73020A8B  # add x19, x19, x10
 60024039  # ldrb w0, [x19]
+05000014  # b rsb_update_offset
 
+:rsb_have_data
+    ; Read from pre-loaded stdin buffer
+0906A8D2  # movz x9, #0x4030, lsl #16
+333D40F9  # ldr x19, [x9, #0x78] # current sector buffer pointer
+73020A8B  # add x19, x19, x10
+60024039  # ldrb w0, [x19]
+
+:rsb_update_offset
     ; Update stdin_offset
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A1D40F9  # ldr x10, [x9, #0x38]
@@ -1870,7 +2015,7 @@ FE0300F9  # str x30, [sp]
     ; Zero page table (4KB at 0x40100000)
 0002A8D2  # movz x0, #0x4010, lsl #16
 010082D2  # movz x1, #0x1000
-CFFFFF97  # bl memset_zero
+BAFFFF97  # bl memset_zero
 
     ; MAIR_EL1: attr0=0xFF (Normal WB), attr1=0x04 (Device nGnRE)
 E09F80D2  # movz x0, #0x04FF
@@ -1921,6 +2066,125 @@ A9E080D2  # movz x9, #0x0705
 FE0340F9  # ldr x30, [sp]
 FF430091  # add sp, sp, #16
 C0035FD6  # ret
+
+;============================================================
+; _trampoline: Board-detection entry point
+;============================================================
+:_trampoline
+09000010  # adr x9, _trampoline
+0A00A8D2  # movz x10, #0x4000, lsl #16
+3F010AEB  # cmp x9, x10
+62090054  # b.hs tramp_virt
+
+    ; --- Raspi3b: build L1+L2 page tables at PA 0x00200000, enable MMU ---
+    ; L1 at PA 0x200000 (32 bytes)
+    ; L2_0 at PA 0x201000 (4096 bytes) for Entry 0 (user+kernel)
+    ; L2_1 at PA 0x202000 (4096 bytes) for Entry 1 (kernel-only)
+    ; Use x12 (not x0 — x0 holds stdin_sector from stage1)
+    ; Zero 12KB (L1 + L2_0 + L2_1)
+0C04A0D2  # movz x12, #0x0020, lsl #16
+090080D2  # movz x9, #0
+0A0086D2  # movz x10, #0x3000
+:tramp_zero
+9F6929F8  # str xzr, [x12, x9]
+29210091  # add x9, x9, #8
+3F010AEB  # cmp x9, x10
+ABFFFF54  # b.lt tramp_zero
+
+    ; --- L1 table at PA 0x200000 ---
+0C04A0D2  # movz x12, #0x0020, lsl #16
+    ; Entry 0: TABLE → L2_0 at PA 0x201000
+0904A0D2  # movz x9, #0x0020, lsl #16
+690082F2  # movk x9, #0x1003
+890100F9  # str x9, [x12, #0]
+    ; Entry 1: TABLE → L2_1 at PA 0x202000
+0904A0D2  # movz x9, #0x0020, lsl #16
+690084F2  # movk x9, #0x2003
+890500F9  # str x9, [x12, #8]
+    ; Entry 2: 1GB Block, Normal WB, kernel-only (for file data at VA 0x80000000+)
+29E080D2  # movz x9, #0x0701
+890900F9  # str x9, [x12, #16]
+
+    ; --- Fill L2_0 at PA 0x201000 (user+kernel) ---
+    ; Entries 0-503: Normal WB, kernel-only initially (0x0701)
+    ; Entries 504-511: Device nGnRE (0x0705)
+0C04A0D2  # movz x12, #0x0020, lsl #16
+0C0082F2  # movk x12, #0x1000
+090080D2  # movz x9, #0
+0A04A0D2  # movz x10, #0x0020, lsl #16
+:tramp_l2_fill
+2B7D0A9B  # mul x11, x9, x10
+3FE107F1  # cmp x9, #504
+8A000054  # b.ge tramp_l2_device
+2DE080D2  # movz x13, #0x0701
+6B010DAA  # orr x11, x11, x13
+03000014  # b tramp_l2_store
+:tramp_l2_device
+ADE080D2  # movz x13, #0x0705
+6B010DAA  # orr x11, x11, x13
+:tramp_l2_store
+2DF17DD3  # lsl x13, x9, #3
+8B692DF8  # str x11, [x12, x13]
+29050091  # add x9, x9, #1
+3F0108F1  # cmp x9, #512
+8BFEFF54  # b.lt tramp_l2_fill
+
+    ; --- Copy L2_0 to L2_1 at PA 0x202000 (same content, kernel-only) ---
+0904A0D2  # movz x9, #0x0020, lsl #16
+090082F2  # movk x9, #0x1000 # src = L2_0
+0A04A0D2  # movz x10, #0x0020, lsl #16
+0A0084F2  # movk x10, #0x2000 # dst = L2_1
+0B0080D2  # movz x11, #0
+:tramp_l2_copy
+2C696BF8  # ldr x12, [x9, x11]
+4C692BF8  # str x12, [x10, x11]
+6B210091  # add x11, x11, #8
+7F0540F1  # cmp x11, #4096
+8BFFFF54  # b.lt tramp_l2_copy
+
+E99F80D2  # movz x9, #0x04FF
+09A218D5  # msr mair_el1, x9
+29A386D2  # movz x9, #0x3519
+492018D5  # msr tcr_el1, x9
+0904A0D2  # movz x9, #0x0020, lsl #16
+092018D5  # msr ttbr0_el1, x9
+DF3F03D5  # isb
+
+091038D5  # mrs x9, sctlr_el1
+290140B2  # orr x9, x9, #1
+29017EB2  # orr x9, x9, #4
+290174B2  # orr x9, x9, #0x1000
+091018D5  # msr sctlr_el1, x9
+DF3F03D5  # isb
+
+    ; Fix L2 entries 0-503: add AP_EL0 via kernel VA 0x40201000 (Entry 1 → PA 0x201000)
+    ; Change 0x0701 → 0x0741 (add bit 6 = AP_EL0)
+    ; MUST NOT use TLBI (hangs on raspi3b QEMU). DSB+ISB sufficient.
+0904A8D2  # movz x9, #0x4020, lsl #16
+090082F2  # movk x9, #0x1000 # x9 = VA 0x40201000 (L2 table via Entry 1)
+0A0080D2  # movz x10, #0
+:tramp_fix_l2
+4BF17DD3  # lsl x11, x10, #3 # offset = index * 8
+2B010B8B  # add x11, x9, x11
+6C0140F9  # ldr x12, [x11] # current descriptor
+8C017AB2  # orr x12, x12, #0x40 # set bit 6 (AP_EL0)
+6C0100F9  # str x12, [x11]
+4A050091  # add x10, x10, #1
+5FE107F1  # cmp x10, #504 # only fix Normal WB entries, not Device
+2BFFFF54  # b.lt tramp_fix_l2
+9F3F03D5  # dsb sy
+DF3F03D5  # isb
+
+    ; Jump to main at VA (PA + 0x40000000 via Entry 1)
+7B0080D2  # mov x27, #3 # board type = SDHCI (raspi3b)
+69A90010  # adr x9, main
+0A00A8D2  # movz x10, #0x4000, lsl #16
+29010A8B  # add x9, x9, x10
+20011FD6  # br x9
+
+:tramp_virt
+1B0080D2  # mov x27, #0 # board type = not SDHCI (virt)
+46050014  # b main
 
 ;============================================================
 ; strcmp: Compare two null-terminated strings
@@ -2122,14 +2386,14 @@ F30300AA  # mov x19, x0 # saved path
 340940F9  # ldr x20, [x9, #0x10] # next_filenum
 940600D1  # sub x20, x20, #1 # start from last file
 
-    ; File names base = 0x60020000
-5500ACD2  # movz x21, #0x6002, lsl #16
+    ; File names base = 0x60900000
+1512ACD2  # movz x21, #0x6090, lsl #16
 
 :find_file_loop
 9F0E00F1  # cmp x20, #3
 0B010054  # b.lt find_file_not_found
 
-    ; filename address = 0x60020000 + file_index * 1024
+    ; filename address = 0x60900000 + file_index * 1024
 89D676D3  # lsl x9, x20, #10
 A002098B  # add x0, x21, x9
 E10313AA  # mov x1, x19
@@ -2207,12 +2471,12 @@ CABFBDF2  # movk x10, #0xedfe, lsl #16
 
     ; Get structure block offset
 600A40B9  # ldr w0, [x19, #8]
-0EFFFF97  # bl bswap32
+A9FEFF97  # bl bswap32
 7402008B  # add x20, x19, x0 # x20 = struct block pointer
 
     ; Get strings block offset
 600E40B9  # ldr w0, [x19, #0xC]
-0BFFFF97  # bl bswap32
+A6FEFF97  # bl bswap32
 7502008B  # add x21, x19, x0 # x21 = strings block base
 
 160080D2  # mov x22, #0 # node type
@@ -2222,7 +2486,7 @@ CABFBDF2  # movk x10, #0xedfe, lsl #16
 
 :fdt_walk
 800240B9  # ldr w0, [x20]
-04FFFF97  # bl bswap32
+9FFEFF97  # bl bswap32
 FB0300AA  # mov x27, x0 # token
 94120091  # add x20, x20, #4
 
@@ -2304,11 +2568,11 @@ C6FFFF17  # b fdt_walk
 
 :fdt_prop
 800240B9  # ldr w0, [x20]
-C9FEFF97  # bl bswap32
+64FEFF97  # bl bswap32
 F80300AA  # mov x24, x0 # prop_len
 
 800640B9  # ldr w0, [x20, #4]
-C6FEFF97  # bl bswap32
+61FEFF97  # bl bswap32
 FA0300AA  # mov x26, x0 # nameoff
 
 94220091  # add x20, x20, #8
@@ -2331,10 +2595,10 @@ E1010054  # b.ne fdt_prop_skip
 
     ; Extract MMIO base (8-byte)
 800240B9  # ldr w0, [x20]
-B5FEFF97  # bl bswap32
+50FEFF97  # bl bswap32
 177C60D3  # lsl x23, x0, #32
 800640B9  # ldr w0, [x20, #4]
-B2FEFF97  # bl bswap32
+4DFEFF97  # bl bswap32
 F70200AA  # orr x23, x23, x0
 
 DF0A00F1  # cmp x22, #2
@@ -2412,7 +2676,7 @@ BF2200B9  # str wzr, [x21, #0x20]
 
 E00316AA  # mov x0, x22
 010084D2  # movz x1, #0x2000
-70FEFF97  # bl memset_zero
+0BFEFF97  # bl memset_zero
 
 090082D2  # movz w9, #0x1000
 A92A00B9  # str w9, [x21, #0x28]
@@ -2444,11 +2708,11 @@ A97200B9  # str w9, [x21, #0x70]
 
 A97240B9  # ldr w9, [x21, #0x70]
 29017D92  # and w9, w9, #8
-E9CAFFB4  # cbz w9, reboot
+A9BCFFB4  # cbz w9, reboot
 
 E00316AA  # mov x0, x22
 010084D2  # movz x1, #0x2000
-59FEFF97  # bl memset_zero
+F4FDFF97  # bl memset_zero
 
 BF3200B9  # str wzr, [x21, #0x30]
 
@@ -2481,8 +2745,8 @@ A97200B9  # str w9, [x21, #0x70]
 
 :virtio_init_fail
 200480D2  # mov x0, #0x21
-F2FDFF97  # bl uart_putchar
-3CFEFF17  # b reboot
+79FDFF97  # bl uart_putchar
+CAFDFF17  # b reboot
 
 :virtio_init_done
     ; Convert MMIO PA to VA by adding 0xC0000000 (Entry 3 mapping)
@@ -2903,8 +3167,68 @@ F71700F9  # str x23, [sp, #40]
 F81B00F9  # str x24, [sp, #48]
 F91F00F9  # str x25, [sp, #56]
 
+    ; Pre-load stdin data using CMD18 (raspi3b only — SDHCI PIO)
+    ; On virt, skip preload (uses per-sector VirtIO reads)
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A5540F9  # ldr x10, [x9, #0xA8] # board_has_sdhci flag
+0A0500B4  # cbz x10, shell_loop # skip preload if no SDHCI
+360140F9  # ldr x22, [x9, #0x00] # SDHCI base
+    ; Read up to 16128 sectors (8MB) starting from stdin_sector into VA 0x42000000
+341940F9  # ldr x20, [x9, #0x30] # stdin_sector
+    ; Store buffer pointer in globals+0x78
+    ; Set to buffer - 512 so first advance (triggered by offset=512) lands at buffer start
+EA3FA8D2  # movz x10, #0x41FF, lsl #16
+0AC09FF2  # movk x10, #0xFE00 # 0x42000000 - 512 = 0x41FFFE00
+2A3D00F9  # str x10, [x9, #0x78]
+    ; Set stdin_offset to 512 to trigger first advance
+0A4080D2  # mov x10, #512
+2A1D00F9  # str x10, [x9, #0x38]
+    ; CMD18: multi-block read
+EAFF9FD2  # movz w10, #0xFFFF
+CA3200B9  # str w10, [x22, #0x30]
+0A4080D2  # movz w10, #0x0200
+CA0A0079  # strh w10, [x22, #0x04] # block size = 512
+0AE087D2  # movz w10, #0x3F00
+CA0E0079  # strh w10, [x22, #0x06] # block count = 16128
+8ADA77D3  # lsl w10, w20, #9
+CA0A00B9  # str w10, [x22, #0x08] # arg = stdin_sector * 512
+    ; CMD18 + multi-block + block count enable + read + auto CMD12
+CA0680D2  # movz w10, #0x0036
+4A47A2F2  # movk w10, #0x123A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+    ; PIO read all blocks
+1340A8D2  # movz x19, #0x4200, lsl #16 # buffer VA 0x42000000 (PA 0x02000000, slow but safe from file data)
+17E087D2  # movz x23, #0x3F00 # 16128 blocks
+:preload_block
+970100B4  # cbz x23, preload_done
+    ; Wait BRR for this block
+:preload_brr
+B2010094  # bl sdhci_read_status
+4B017B92  # and w11, w10, #0x20
+CBFFFFB4  # cbz w11, preload_brr
+    ; Read 128 words for this block
+141080D2  # mov x20, #128
+:preload_pio
+CB2240B9  # ldr w11, [x22, #0x20]
+6B0200B9  # str w11, [x19]
+73120091  # add x19, x19, #4
+940600D1  # sub x20, x20, #1
+94FFFFB5  # cbnz x20, preload_pio
+F70600D1  # sub x23, x23, #1
+F5FFFF17  # b preload_block
+:preload_done
+    ; Advance stdin_sector past preloaded data for per-sector fallback
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A1940F9  # ldr x10, [x9, #0x30] # stdin_sector
+0BE087D2  # movz x11, #0x3F00 # 16128
+4A010B8B  # add x10, x10, x11
+2A1900F9  # str x10, [x9, #0x30] # stdin_sector += 16128
+    ; Clear status
+EAFF9FD2  # movz w10, #0xFFFF
+CA3200B9  # str w10, [x22, #0x30]
+
 :shell_loop
-21FDFF97  # bl read_stdin_byte
+92FCFF97  # bl read_stdin_byte
 F30300AA  # mov x19, x0
 
 530200B4  # cbz x19, shell_done
@@ -2929,42 +3253,42 @@ E00C0054  # b.eq handle_hex0
 F2000014  # b handle_other_command
 
 :shell_skip_comment
-11FDFF97  # bl read_stdin_byte
+82FCFF97  # bl read_stdin_byte
 1F2800F1  # cmp x0, #0x0A
 C1FFFF54  # b.ne shell_skip_comment
 EDFFFF17  # b shell_loop
 
 :shell_done
 800880D2  # mov x0, #0x44
-AAFCFF97  # bl uart_putchar
+07FCFF97  # bl uart_putchar
 E00D80D2  # mov x0, #0x6F
-A8FCFF97  # bl uart_putchar
+05FCFF97  # bl uart_putchar
 C00D80D2  # mov x0, #0x6E
-A6FCFF97  # bl uart_putchar
+03FCFF97  # bl uart_putchar
 A00C80D2  # mov x0, #0x65
-A4FCFF97  # bl uart_putchar
+01FCFF97  # bl uart_putchar
 C00580D2  # mov x0, #0x2E
-A2FCFF97  # bl uart_putchar
+FFFBFF97  # bl uart_putchar
 400180D2  # mov x0, #0x0A
-A0FCFF97  # bl uart_putchar
+FDFBFF97  # bl uart_putchar
 
-80010094  # bl flush_disk
-E9FCFF17  # b reboot
+1A020094  # bl flush_disk
+4DFCFF17  # b reboot
 
 ;============================================================
 ; handle_flush: 'f' command
 ;============================================================
 :handle_flush
-FFFCFF97  # bl read_stdin_byte
+70FCFF97  # bl read_stdin_byte
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A0080D2  # mov x10, #1
 2A2500F9  # str x10, [x9, #0x48]
 
 C00C80D2  # mov x0, #0x66
-98FCFF97  # bl uart_putchar
+F5FBFF97  # bl uart_putchar
 400180D2  # mov x0, #0x0A
-96FCFF97  # bl uart_putchar
+F3FBFF97  # bl uart_putchar
 
 D6FFFF17  # b shell_loop
 
@@ -2973,21 +3297,21 @@ D6FFFF17  # b shell_loop
 ;============================================================
 :handle_src
 600E80D2  # mov x0, #0x73
-93FCFF97  # bl uart_putchar
+F0FBFF97  # bl uart_putchar
 400E80D2  # mov x0, #0x72
-91FCFF97  # bl uart_putchar
+EEFBFF97  # bl uart_putchar
 600C80D2  # mov x0, #0x63
-8FFCFF97  # bl uart_putchar
+ECFBFF97  # bl uart_putchar
 000480D2  # mov x0, #0x20
-8DFCFF97  # bl uart_putchar
+EAFBFF97  # bl uart_putchar
 
-EEFCFF97  # bl read_stdin_byte
-EDFCFF97  # bl read_stdin_byte
-ECFCFF97  # bl read_stdin_byte
+5FFCFF97  # bl read_stdin_byte
+5EFCFF97  # bl read_stdin_byte
+5DFCFF97  # bl read_stdin_byte
 
 140080D2  # mov x20, #0
 :src_parse_count
-EAFCFF97  # bl read_stdin_byte
+5BFCFF97  # bl read_stdin_byte
 1F8000F1  # cmp x0, #0x20
 C0000054  # b.eq src_count_done
 490180D2  # mov x9, #10
@@ -3001,7 +3325,7 @@ F50314AA  # mov x21, x20
 1600ACD2  # movz x22, #0x6000, lsl #16
 F70316AA  # mov x23, x22
 :src_read_name
-DFFCFF97  # bl read_stdin_byte
+50FCFF97  # bl read_stdin_byte
 1F2800F1  # cmp x0, #0x0A
 80000054  # b.eq src_name_done
 E0020039  # strb w0, [x23]
@@ -3011,18 +3335,18 @@ FBFFFF17  # b src_read_name
 FF020039  # strb wzr, [x23]
 
 E00316AA  # mov x0, x22
-AFFCFF97  # bl print_string
+13FCFF97  # bl print_string
 400180D2  # mov x0, #0x0A
-73FCFF97  # bl uart_putchar
+D0FBFF97  # bl uart_putchar
 
 E00316AA  # mov x0, x22
-1BFDFF97  # bl absolute_path
+F1FCFF97  # bl absolute_path
 F60300AA  # mov x22, x0
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 370940F9  # ldr x23, [x9, #0x10]
 
-4A00ACD2  # movz x10, #0x6002, lsl #16
+0A12ACD2  # movz x10, #0x6090, lsl #16
 EBD676D3  # lsl x11, x23, #10
 4A010B8B  # add x10, x10, x11
 EB0316AA  # mov x11, x22
@@ -3051,7 +3375,7 @@ D70240F9  # ldr x23, [x22]
 
 :src_read_data
 D40000B4  # cbz x20, src_data_done
-B9FCFF97  # bl read_stdin_byte
+2AFCFF97  # bl read_stdin_byte
 E0020039  # strb w0, [x23]
 F7060091  # add x23, x23, #1
 940600D1  # sub x20, x20, #1
@@ -3072,25 +3396,25 @@ D50600F9  # str x21, [x22, #8]
 ;============================================================
 :handle_hex0
 000D80D2  # mov x0, #0x68
-4BFCFF97  # bl uart_putchar
+A8FBFF97  # bl uart_putchar
 A00C80D2  # mov x0, #0x65
-49FCFF97  # bl uart_putchar
+A6FBFF97  # bl uart_putchar
 000F80D2  # mov x0, #0x78
-47FCFF97  # bl uart_putchar
+A4FBFF97  # bl uart_putchar
 000680D2  # mov x0, #0x30
-45FCFF97  # bl uart_putchar
+A2FBFF97  # bl uart_putchar
 000480D2  # mov x0, #0x20
-43FCFF97  # bl uart_putchar
+A0FBFF97  # bl uart_putchar
 
-A4FCFF97  # bl read_stdin_byte
-A3FCFF97  # bl read_stdin_byte
-A2FCFF97  # bl read_stdin_byte
-A1FCFF97  # bl read_stdin_byte
+15FCFF97  # bl read_stdin_byte
+14FCFF97  # bl read_stdin_byte
+13FCFF97  # bl read_stdin_byte
+12FCFF97  # bl read_stdin_byte
 
 1400ACD2  # movz x20, #0x6000, lsl #16
 F70314AA  # mov x23, x20
 :hex0_read_input
-9EFCFF97  # bl read_stdin_byte
+0FFCFF97  # bl read_stdin_byte
 1F8000F1  # cmp x0, #0x20
 80000054  # b.eq hex0_input_done
 E0020039  # strb w0, [x23]
@@ -3100,15 +3424,15 @@ FBFFFF17  # b hex0_read_input
 FF020039  # strb wzr, [x23]
 
 E00314AA  # mov x0, x20
-6EFCFF97  # bl print_string
+D2FBFF97  # bl print_string
 000480D2  # mov x0, #0x20
-32FCFF97  # bl uart_putchar
+8FFBFF97  # bl uart_putchar
 
 1500ACD2  # movz x21, #0x6000, lsl #16
 B5021091  # add x21, x21, #0x400
 F70315AA  # mov x23, x21
 :hex0_read_output
-90FCFF97  # bl read_stdin_byte
+01FCFF97  # bl read_stdin_byte
 1F2800F1  # cmp x0, #0x0A
 80000054  # b.eq hex0_output_done
 E0020039  # strb w0, [x23]
@@ -3118,14 +3442,14 @@ FBFFFF17  # b hex0_read_output
 FF020039  # strb wzr, [x23]
 
 E00315AA  # mov x0, x21
-60FCFF97  # bl print_string
+C4FBFF97  # bl print_string
 400180D2  # mov x0, #0x0A
-24FCFF97  # bl uart_putchar
+81FBFF97  # bl uart_putchar
 
 E00314AA  # mov x0, x20
-CCFCFF97  # bl absolute_path
+A2FCFF97  # bl absolute_path
 F40300AA  # mov x20, x0
-35FDFF97  # bl find_file
+0BFDFF97  # bl find_file
 1F0000F1  # cmp x0, #0
 EBEBFF54  # b.lt shell_loop
 F70300AA  # mov x23, x0
@@ -3137,13 +3461,13 @@ EAEE7CD3  # lsl x10, x23, #4
 370540F9  # ldr x23, [x9, #8]
 
 E00315AA  # mov x0, x21
-C0FCFF97  # bl absolute_path
+96FCFF97  # bl absolute_path
 F50300AA  # mov x21, x0
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 380940F9  # ldr x24, [x9, #0x10]
 
-4A00ACD2  # movz x10, #0x6002, lsl #16
+0A12ACD2  # movz x10, #0x6090, lsl #16
 0BD776D3  # lsl x11, x24, #10
 4A010B8B  # add x10, x10, x11
 EB0315AA  # mov x11, x21
@@ -3261,7 +3585,7 @@ CFFFFF17  # b hex0_compile_loop
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A2540F9  # ldr x10, [x9, #0x48]
 4A0000B4  # cbz x10, hoc_no_flush
-9C000094  # bl flush_disk
+36010094  # bl flush_disk
 :hoc_no_flush
 
 1400ACD2  # movz x20, #0x6000, lsl #16
@@ -3271,7 +3595,7 @@ CFFFFF17  # b hex0_compile_loop
 95060091  # add x21, x20, #1
 
 :hoc_read_name
-17FCFF97  # bl read_stdin_byte
+88FBFF97  # bl read_stdin_byte
 1F8000F1  # cmp x0, #0x20
 80000054  # b.eq hoc_name_done
 A0020039  # strb w0, [x21]
@@ -3285,7 +3609,7 @@ BF020039  # strb wzr, [x21]
 B502098B  # add x21, x21, x9
 F60315AA  # mov x22, x21
 :hoc_read_arg
-0CFCFF97  # bl read_stdin_byte
+7DFBFF97  # bl read_stdin_byte
 1F2800F1  # cmp x0, #0x0A
 80000054  # b.eq hoc_arg_done
 C0020039  # strb w0, [x22]
@@ -3295,13 +3619,13 @@ FBFFFF17  # b hoc_read_arg
 DF020039  # strb wzr, [x22]
 
 E00314AA  # mov x0, x20
-DCFBFF97  # bl print_string
+40FBFF97  # bl print_string
 000480D2  # mov x0, #0x20
-A0FBFF97  # bl uart_putchar
+FDFAFF97  # bl uart_putchar
 E00315AA  # mov x0, x21
-D8FBFF97  # bl print_string
+3CFBFF97  # bl print_string
 400180D2  # mov x0, #0x0A
-9CFBFF97  # bl uart_putchar
+F9FAFF97  # bl uart_putchar
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 342D00F9  # str x20, [x9, #0x58]
@@ -3310,10 +3634,10 @@ D8FBFF97  # bl print_string
 3F3900F9  # str xzr, [x9, #0x70]
 
 E00314AA  # mov x0, x20
-3FFCFF97  # bl absolute_path
+15FCFF97  # bl absolute_path
 F40300AA  # mov x20, x0
 
-A8FCFF97  # bl find_file
+7EFCFF97  # bl find_file
 1F0000F1  # cmp x0, #0
 8B0D0054  # b.lt hoc_not_found
 F60300AA  # mov x22, x0
@@ -3329,7 +3653,7 @@ CAEE7CD3  # lsl x10, x22, #4
 4A050091  # add x10, x10, #1
 2A1100F9  # str x10, [x9, #0x20]
 
-29FCFF97  # bl get_process_base
+FFFBFF97  # bl get_process_base
 F80300AA  # mov x24, x0
 
 090082D2  # movz x9, #0x1000
@@ -3349,7 +3673,7 @@ FAFFFF17  # b hoc_copy_cwd
 
 00030891  # add x0, x24, #0x200
 01C081D2  # movz x1, #0xE00
-C6FBFF97  # bl memset_zero
+37FBFF97  # bl memset_zero
 
 D90E40F9  # ldr x25, [x22, #0x18]
 C91240F9  # ldr x9, [x22, #0x20]
@@ -3358,7 +3682,7 @@ D3724079  # ldrh w19, [x22, #0x38]
 
 000CA8D2  # movz x0, #0x4060, lsl #16
 0104A0D2  # movz x1, #0x20, lsl #16
-BFFBFF97  # bl memset_zero
+30FBFF97  # bl memset_zero
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 0A0EA8D2  # movz x10, #0x4070, lsl #16
@@ -3376,7 +3700,7 @@ E90A40F9  # ldr x9, [x23, #0x10]
 0A00A8D2  # movz x10, #0x4000, lsl #16
 20010A8B  # add x0, x9, x10
 E21240F9  # ldr x2, [x23, #0x20]
-B7FBFF97  # bl memcpy
+28FBFF97  # bl memcpy
 
 E90A40F9  # ldr x9, [x23, #0x10]
 EA1240F9  # ldr x10, [x23, #0x20]
@@ -3421,7 +3745,7 @@ EA030091  # mov x10, sp
 E00316AA  # mov x0, x22
 E10315AA  # mov x1, x21
 022080D2  # mov x2, #256
-96FBFF97  # bl memcpy
+07FBFF97  # bl memcpy
 0900A8D2  # movz x9, #0x4000, lsl #16
 C90209CB  # sub x9, x22, x9
 732200D1  # sub x19, x19, #8
@@ -3432,7 +3756,7 @@ D7020491  # add x23, x22, #0x100
 E00317AA  # mov x0, x23
 E10314AA  # mov x1, x20
 022080D2  # mov x2, #256
-8DFBFF97  # bl memcpy
+FEFAFF97  # bl memcpy
 0900A8D2  # movz x9, #0x4000, lsl #16
 E90209CB  # sub x9, x23, x9
 732200D1  # sub x19, x19, #8
@@ -3459,13 +3783,211 @@ E0039FD6  # eret
 
 :hoc_not_found
 E00780D2  # mov x0, #0x3F
-24FBFF97  # bl uart_putchar
+81FAFF97  # bl uart_putchar
 400180D2  # mov x0, #0x0A
-22FBFF97  # bl uart_putchar
+7FFAFF97  # bl uart_putchar
 62FEFF17  # b shell_loop
 
 :shell_return
 61FEFF17  # b shell_loop
+
+; sdhci_read_status: Read SDHCI interrupt status (breaks TCG TB)
+; x22 = SDHCI base. Returns w10 = status.
+:sdhci_read_status
+CA3240B9  # ldr w10, [x22, #0x30]
+C0035FD6  # ret
+
+; sdhci_read_status9: Same but using x9 as base
+:sdhci_read_status9
+2A3140B9  # ldr w10, [x9, #0x30]
+C0035FD6  # ret
+
+; sdhci_cmd_wait: Wait for Command Complete (bit 0), clear status
+:sdhci_cmd_wait
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+:sdhci_cmd_wait_loop
+FAFFFF97  # bl sdhci_read_status
+4B014092  # and w11, w10, #1
+CBFFFFB4  # cbz w11, sdhci_cmd_wait_loop
+EAFF9FD2  # movz w10, #0xFFFF
+CA3200B9  # str w10, [x22, #0x30]
+FE0340F9  # ldr x30, [sp]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+; sdhci_pio_read_word: Read one word from SDHCI data port
+; x9 = SDHCI base. Returns w11 = data word.
+:sdhci_pio_read_word
+2B2140B9  # ldr w11, [x9, #0x20]
+C0035FD6  # ret
+
+; sdhci_read_sector: Read one 512-byte sector via SDHCI PIO
+; x0 = sector number, x1 = destination buffer (VA)
+; to avoid QEMU TCG translation block caching of MMIO reads.
+:sdhci_read_sector
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F40300AA  # mov x20, x0 # sector number
+F30301AA  # mov x19, x1 # destination buffer
+0906A8D2  # movz x9, #0x4030, lsl #16
+360140F9  # ldr x22, [x9, #0x00]
+    ; CMD17 (clear only CC+BRR+TC bits, not all)
+6A0480D2  # mov w10, #0x23
+CA3200B9  # str w10, [x22, #0x30]
+0A4080D2  # movz w10, #0x0200
+CA0A0079  # strh w10, [x22, #0x04]
+2A0080D2  # mov w10, #1
+CA0E0079  # strh w10, [x22, #0x06]
+8ADA77D3  # lsl w10, w20, #9
+CA0A00B9  # str w10, [x22, #0x08]
+0A0280D2  # movz w10, #0x0010
+4A27A2F2  # movk w10, #0x113A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+    ; Wait BRR using bl sdhci_read_status (proven to work)
+:sdhci_rs_brr
+DDFFFF97  # bl sdhci_read_status
+4B017B92  # and w11, w10, #0x20
+CBFFFFB4  # cbz w11, sdhci_rs_brr
+    ; PIO read 128 words
+141080D2  # mov x20, #128
+:sdhci_rs_pio
+CB2240B9  # ldr w11, [x22, #0x20]
+6B0200B9  # str w11, [x19]
+73120091  # add x19, x19, #4
+940600D1  # sub x20, x20, #1
+94FFFFB5  # cbnz x20, sdhci_rs_pio
+    ; Clear only CC+BRR+TC bits after PIO read
+6A0480D2  # mov w10, #0x23
+CA3200B9  # str w10, [x22, #0x30]
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
+
+; sdhci_reinit_card: Full CMD0-CMD16 re-init (x22 = SDHCI base)
+:sdhci_reinit_card
+FF4300D1  # sub sp, sp, #16
+FE0300F9  # str x30, [sp]
+    ; Software reset
+2A0080D2  # mov w10, #1
+CABE0039  # strb w10, [x22, #0x2F]
+2A0080D2  # movz w10, #0x0001
+CA5A0079  # strh w10, [x22, #0x2C]
+:sdhci_ric_clk
+CA5A4079  # ldrh w10, [x22, #0x2C]
+4A017F92  # and w10, w10, #2
+CAFFFFB4  # cbz w10, sdhci_ric_clk
+AA0080D2  # movz w10, #0x0005
+CA5A0079  # strh w10, [x22, #0x2C]
+EA0180D2  # mov w10, #0x0F
+CAA60039  # strb w10, [x22, #0x29]
+CA0180D2  # mov w10, #0x0E
+CABA0039  # strb w10, [x22, #0x2E]
+EAFF9FD2  # movz w10, #0xFFFF
+CA3600B9  # str w10, [x22, #0x34]
+CA3A00B9  # str w10, [x22, #0x38]
+    ; CMD0
+DF0A00B9  # str wzr, [x22, #0x08]
+DF0E00B9  # str wzr, [x22, #0x0C]
+BDFFFF97  # bl sdhci_cmd_wait
+    ; CMD8
+4A3580D2  # movz w10, #0x01AA
+CA0A00B9  # str w10, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4A03A1F2  # movk w10, #0x081A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+B7FFFF97  # bl sdhci_cmd_wait
+    ; CMD55
+DF0A00B9  # str wzr, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4AE3A6F2  # movk w10, #0x371A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+B2FFFF97  # bl sdhci_cmd_wait
+    ; ACMD41
+0A0090D2  # movz w10, #0x8000
+EA1FA8F2  # movk w10, #0x40FF, lsl #16
+CA0A00B9  # str w10, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4A20A5F2  # movk w10, #0x2902, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+ABFFFF97  # bl sdhci_cmd_wait
+    ; CMD2
+DF0A00B9  # str wzr, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+2A41A0F2  # movk w10, #0x0209, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+A6FFFF97  # bl sdhci_cmd_wait
+    ; CMD3
+DF0A00B9  # str wzr, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4A63A0F2  # movk w10, #0x031A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+A1FFFF97  # bl sdhci_cmd_wait
+    ; CMD7
+CA1240B9  # ldr w10, [x22, #0x10]
+4A3D7092  # and w10, w10, #0xFFFF0000
+CA0A00B9  # str w10, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4AE3A0F2  # movk w10, #0x071A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+9AFFFF97  # bl sdhci_cmd_wait
+    ; CMD16
+0A4080D2  # movz w10, #0x200
+CA0A00B9  # str w10, [x22, #0x08]
+0A0080D2  # movz w10, #0x0000
+4A03A2F2  # movk w10, #0x101A, lsl #16
+CA0E00B9  # str w10, [x22, #0x0C]
+94FFFF97  # bl sdhci_cmd_wait
+FE0340F9  # ldr x30, [sp]
+FF430091  # add sp, sp, #16
+C0035FD6  # ret
+
+:sdhci_write_sector
+FF8300D1  # sub sp, sp, #32
+FE0300F9  # str x30, [sp]
+F30700F9  # str x19, [sp, #8]
+F40B00F9  # str x20, [sp, #16]
+F40300AA  # mov x20, x0 # sector number
+F30301AA  # mov x19, x1 # source buffer
+0906A8D2  # movz x9, #0x4030, lsl #16
+290140F9  # ldr x9, [x9, #0x00]
+EAFF9FD2  # movz w10, #0xFFFF
+2A3100B9  # str w10, [x9, #0x30]
+0A4080D2  # movz w10, #0x0200
+2A090079  # strh w10, [x9, #0x04]
+2A0080D2  # mov w10, #1
+2A0D0079  # strh w10, [x9, #0x06]
+8ADA77D3  # lsl w10, w20, #9
+2A0900B9  # str w10, [x9, #0x08]
+0A0080D2  # movz w10, #0x0000
+4A07A3F2  # movk w10, #0x183A, lsl #16
+2A0D00B9  # str w10, [x9, #0x0C]
+:sdhci_ws_bwr
+2A3140B9  # ldr w10, [x9, #0x30]
+4B017C92  # and w11, w10, #0x10
+CBFFFFB4  # cbz w11, sdhci_ws_bwr
+0A1080D2  # mov x10, #128
+:sdhci_ws_pio
+6B0240B9  # ldr w11, [x19]
+73120091  # add x19, x19, #4
+2B2100B9  # str w11, [x9, #0x20]
+4A0500D1  # sub x10, x10, #1
+8AFFFFB5  # cbnz x10, sdhci_ws_pio
+:sdhci_ws_tc
+2A3140B9  # ldr w10, [x9, #0x30]
+4B017F92  # and w11, w10, #2
+CBFFFFB4  # cbz w11, sdhci_ws_tc
+EAFF9FD2  # movz w10, #0xFFFF
+2A3100B9  # str w10, [x9, #0x30]
+FE0340F9  # ldr x30, [sp]
+F30740F9  # ldr x19, [sp, #8]
+F40B40F9  # ldr x20, [sp, #16]
+FF830091  # add sp, sp, #32
+C0035FD6  # ret
 
 ;============================================================
 ; flush_disk: Write /dev/hda file contents back to disk
@@ -3479,7 +4001,7 @@ F50F00F9  # str x21, [sp, #24]
 
 0906A8D2  # movz x9, #0x4030, lsl #16
 2A2540F9  # ldr x10, [x9, #0x48]
-AA0400B4  # cbz x10, flush_done
+4A0500B4  # cbz x10, flush_done
 
 0000ACD2  # movz x0, #0x6000, lsl #16
 E90580D2  # mov w9, #0x2F
@@ -3499,15 +4021,23 @@ E90580D2  # mov w9, #0x2F
 290C80D2  # mov w9, #0x61
 091C0039  # strb w9, [x0, #7]
 1F200039  # strb wzr, [x0, #8]
-1AFCFF97  # bl find_file
+56FBFF97  # bl find_file
 1F0000F1  # cmp x0, #0
-0B020054  # b.lt flush_done
+AB020054  # b.lt flush_done
 
 4910ACD2  # movz x9, #0x6082, lsl #16
 0AEC7CD3  # lsl x10, x0, #4
 29010A8B  # add x9, x9, x10
 330140F9  # ldr x19, [x9]
 340540F9  # ldr x20, [x9, #8]
+
+    ; Re-init SDHCI before writing (needed after CMD18 preload)
+0906A8D2  # movz x9, #0x4030, lsl #16
+2A5540F9  # ldr x10, [x9, #0xA8] # board_has_sdhci?
+6A0000B4  # cbz x10, flush_skip_reinit
+360140F9  # ldr x22, [x9, #0x00] # SDHCI base
+73FFFF97  # bl sdhci_reinit_card
+:flush_skip_reinit
 
 150080D2  # mov x21, #0
 :flush_sector_loop
@@ -3516,7 +4046,7 @@ E90580D2  # mov w9, #0x2F
 
 E00315AA  # mov x0, x21
 E10313AA  # mov x1, x19
-1AFDFF97  # bl disk_write_sector
+51FCFF97  # bl disk_write_sector
 
 73020891  # add x19, x19, #512
 940208D1  # sub x20, x20, #512
@@ -3538,40 +4068,89 @@ C0035FD6  # ret
     ; Use SP_EL1 for kernel, then set it
 BF4100D5  # msr spsel, #1
 DF3F03D5  # isb
-0900ADD2  # movz x9, #0x6800, lsl #16
-3F010091  # mov sp, x9 # SP_EL1 = 0x68000000
+0970AFD2  # movz x9, #0x7B80, lsl #16
+3F010091  # mov sp, x9 # SP_EL1 = 0x7B800000
 
     ; Save x0 = stdin_sector and x1 = DTB pointer
 F80300AA  # mov x24, x0
 F90301AA  # mov x25, x1
+FA0302AA  # mov x26, x2
+    ; x27 is set by _trampoline (3=raspi3b, 0=virt) — do not use x3
+
 
     ; Load RAM base into x20
-2EFBFF97  # bl load_ram_base
+F2F9FF97  # bl load_ram_base
 
     ; Set up exception vector table
-A9AFFE10  # adr x9, exception_vectors
+C97EFE10  # adr x9, exception_vectors
 09C018D5  # msr vbar_el1, x9
 
     ; Disable all EL1 interrupts
 DF4F03D5  # msr daifset, #0xF
 
+    ; Set UART base for non-raspi3b boards (virt: PA 0x09000000, Entry 3 VA 0xC9000000)
+7F0F00F1  # cmp x27, #3
+60010054  # b.eq init_sdhci
+0920B9D2  # movz x9, #0xC900, lsl #16 # virt UART VA via Entry 3
+0A06A8D2  # movz x10, #0x4030, lsl #16
+495100F9  # str x9, [x10, #0xA0]
+
     ; Parse device tree
 E00319AA  # mov x0, x25
-20FCFF97  # bl fdt_find_storage
-
+51FBFF97  # bl fdt_find_storage
 3F0400F1  # cmp x1, #1
-80000054  # b.eq init_virtio
+A0030054  # b.eq init_virtio
 3F0800F1  # cmp x1, #2
-80000054  # b.eq init_spi_sd
-28FBFF17  # b reboot
+E0030054  # b.eq init_spi_sd
+E7F9FF17  # b reboot
+:init_sdhci
+    ; SDHCI and UART accessed via Entry 1 L2 Device entries (VA = PA + 0x40000000)
+    ; x26 = SDHCI PA from stage1 (0x3F300000)
+0900A8D2  # movz x9, #0x4000, lsl #16
+5603098B  # add x22, x26, x9 # x22 = SDHCI VA via Entry 1 (0x7F300000)
+491F6892  # and x9, x26, #0xFF000000
+0A04A0D2  # movz x10, #0x0020, lsl #16
+0A0082F2  # movk x10, #0x1000
+29010AAA  # orr x9, x9, x10
+0A00A8D2  # movz x10, #0x4000, lsl #16
+29010A8B  # add x9, x9, x10 # x9 = UART VA via Entry 1 (0x7F201000)
+0A06A8D2  # movz x10, #0x4030, lsl #16
+495100F9  # str x9, [x10, #0xA0] # UART VA = 0x7F201000
+560100F9  # str x22, [x10, #0x00] # SDHCI VA = 0x7F300000
 
+    ; Initialize PL011 UART properly
+    ; 1. Disable UART
+3F3100B9  # str wzr, [x9, #0x30]
+    ; 2. Set UARTLCR_H: 8-bit word length (WLEN=11) + FIFO enable (FEN=1) = 0x70
+0A0E80D2  # movz w10, #0x70
+2A2D00B9  # str w10, [x9, #0x2C]
+    ; 3. Enable UART (UARTEN=1, TXE=1, RXE=1 = 0x301)
+2A6080D2  # movz w10, #0x0301
+2A3100B9  # str w10, [x9, #0x30]
+
+    ; No SDHCI re-init needed — stage1 already initialized the controller.
+    ; The Entry 3 VA (0xFF300000) maps to the same PA (0x3F300000) that stage1 used.
+    ; On raspi3b, MMU is already on — adr gives VA directly (no offset needed)
+09E3FF10  # adr x9, sdhci_read_sector
+0A06A8D2  # movz x10, #0x4030, lsl #16
+494500F9  # str x9, [x10, #0x88]
+29EFFF10  # adr x9, sdhci_write_sector
+0A06A8D2  # movz x10, #0x4030, lsl #16
+494900F9  # str x9, [x10, #0x90]
+290080D2  # mov x9, #1
+495500F9  # str x9, [x10, #0xA8] # board_has_sdhci = 1
+08000014  # b storage_ready
 :init_virtio
-A7FCFF97  # bl virtio_init
-02000014  # b storage_ready
-
+BFFBFF97  # bl virtio_init
+    ; Clear board_has_sdhci (only for non-SDHCI boards)
+0906A8D2  # movz x9, #0x4030, lsl #16
+3F5500F9  # str xzr, [x9, #0xA8]
+04000014  # b storage_ready
 :init_spi_sd
-C6FDFF97  # bl spi_sd_init
-
+DCFCFF97  # bl spi_sd_init
+    ; Clear board_has_sdhci (SPI+SD is not SDHCI)
+0906A8D2  # movz x9, #0x4030, lsl #16
+3F5500F9  # str xzr, [x9, #0xA8]
 :storage_ready
 
     ; Initialize global data
@@ -3580,17 +4159,21 @@ C6FDFF97  # bl spi_sd_init
 6A0080D2  # mov x10, #3
 2A0900F9  # str x10, [x9, #0x10]
 
-0A80B2D2  # movz x10, #0x9400, lsl #16
+0A32B4D2  # movz x10, #0xA190, lsl #16 # file data start past file names end
 2A0D00F9  # str x10, [x9, #0x18]
 
 2A0080D2  # mov x10, #1
 2A1100F9  # str x10, [x9, #0x20]
 
-0A00AED2  # movz x10, #0x7000, lsl #16
+0A00AFD2  # movz x10, #0x7800, lsl #16 # save area at VA 0x78000000 (PA 0x38000000)
 2A1500F9  # str x10, [x9, #0x28]
 
+    ; board_has_sdhci is set by init_sdhci or cleared by init_virtio — not touched here
 3F2500F9  # str xzr, [x9, #0x48]
 3F2900F9  # str xzr, [x9, #0x50]
+3F3D00F9  # str xzr, [x9, #0x78] # stdin_buf_ptr = 0 (no preload; raspi3b sets this later)
+0A4080D2  # mov x10, #512
+2A1D00F9  # str x10, [x9, #0x38] # stdin_offset = 512 (trigger first sector read)
 
 394100F9  # str x25, [x9, #0x80]
 
@@ -3604,17 +4187,17 @@ C6FDFF97  # bl spi_sd_init
     ; Zero process descriptors (64KB at 0x60400000)
 0008ACD2  # movz x0, #0x6040, lsl #16
 010280D2  # movz x1, #0x10, lsl #12
-16FBFF97  # bl memset_zero
+C2F9FF97  # bl memset_zero
 
-    ; Zero file names area (8MB at 0x60020000)
-4000ACD2  # movz x0, #0x6002, lsl #16
-0110A0D2  # movz x1, #0x80, lsl #16
-13FBFF97  # bl memset_zero
+    ; Zero file names area (16MB at 0x60900000)
+0012ACD2  # movz x0, #0x6090, lsl #16
+0120A0D2  # movz x1, #0x100, lsl #16
+BFF9FF97  # bl memset_zero
 
     ; Zero file descriptors area (512KB at 0x60820000)
 4010ACD2  # movz x0, #0x6082, lsl #16
 0101A0D2  # movz x1, #0x8, lsl #16
-10FBFF97  # bl memset_zero
+BCF9FF97  # bl memset_zero
 
     ; Set process 0 current_dir = "/"
 0908ACD2  # movz x9, #0x6040, lsl #16
@@ -3628,13 +4211,22 @@ EA0580D2  # mov w10, #0x2F
 2A010439  # strb w10, [x9, #0x100]
 3F050439  # strb wzr, [x9, #0x101]
 
-    ; Set up page table
-33FBFF97  # bl setup_page_table
-
-    ; Enable MMU (stays on forever)
-A90082D2  # movz x9, #0x1005 # M=1, C=1, I=1
+    ; Set up page table (skip on raspi3b — trampoline already did it)
+7F0F00F1  # cmp x27, #3
+00010054  # b.eq skip_page_table
+F2F9FF97  # bl setup_page_table
+    ; Enable MMU (stays on forever) — preserve RES1 bits
+091038D5  # mrs x9, sctlr_el1
+290140B2  # orr x9, x9, #1
+29017EB2  # orr x9, x9, #4
+290174B2  # orr x9, x9, #0x1000
 091018D5  # msr sctlr_el1, x9
 DF3F03D5  # isb
+:skip_page_table
+
+    ; SDHCI re-init skipped — stage1's re-init left card in transfer state
+
+:sdhci_reinit_done
 
     ; Jump to internal shell
-EAFDFF17  # b internalshell
+F6FCFF17  # b internalshell

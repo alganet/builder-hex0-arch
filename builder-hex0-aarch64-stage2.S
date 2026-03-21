@@ -23,12 +23,13 @@
 ;   0x50000000  User stack top (VA 0x10000000, grows down)
 ;   0x60000000  Scratch buffer (64KB)
 ;   0x60010000  stdin device buffer (64KB)
-;   0x60020000  File names (8MB, 8192 entries x 1024 bytes)
+;   0x60900000  File names (16MB, 16384 entries x 1024 bytes)
 ;   0x60400000  Process descriptors (16 x 4096)
 ;   0x60820000  File descriptors (512KB, 32768 x 16 bytes)
-;   0x68000000  Kernel stack top (grows down)
-;   0x70000000  Saved process memory (bump allocator)
-;   0x94000000  File data (bump allocator, next_file_address)
+;   0x7B800000  Kernel stack top (grows down)
+;   0x42000000  Preload buffer (8MB, raspi3b only, PA 0x02000000 slow zone)
+;   0x78000000  Saved process memory (bump allocator)
+;   0xA1900000  File data (bump allocator, grows up to 0xBFFFFFFF)
 ;
 ; AArch64 paging (1GB block descriptors, level 1 table):
 ;   Entry 0: VA 0x00000000-0x3FFFFFFF -> PA 0x40000000 (User, Normal memory)
@@ -51,11 +52,13 @@
 ;   +0x050: have_userspace (8 bytes)
 ;   +0x058: cmd_args (3x8: argv[0], argv[1], NULL)
 ;   +0x070: cmd_env (1x8: NULL)
-;   +0x078: (unused)
+;   +0x078: stdin_buf_ptr (8 bytes, preload buffer pointer)
 ;   +0x080: dtb_pointer (8 bytes)
 ;   +0x088: disk_read_fn (8 bytes)
 ;   +0x090: disk_write_fn (8 bytes)
 ;   +0x098: spi_base (8 bytes)
+;   +0x0A0: uart_base (8 bytes)
+;   +0x0A8: board_has_sdhci (8 bytes)
 ;
 ; Process descriptor (4096 bytes each, at 0x60400000):
 ;   +0x000: process_address (8)
@@ -119,7 +122,7 @@
 ;   offset 264: padding (alignment)
 
 _start:
-    b main
+    b _trampoline
 
 ;============================================================
 ; Exception vector table (must be 2KB aligned)
@@ -237,7 +240,38 @@ trap_handler:
     cmp x9, #0x15
     b.eq dispatch
 
-    ; Not SVC: terminate process with exit code 139 (like SIGSEGV)
+    ; Not SVC: print crash info and terminate with exit code 139
+    mrs x20, esr_el1
+    mrs x21, elr_el1
+    mrs x22, far_el1
+    mrs x23, sp_el0
+    mov x0, #0x21                 ; '!'
+    bl uart_putchar
+    lsr x0, x20, #26             ; exception class
+    bl print_hex_byte
+    mov x0, #0x3A
+    bl uart_putchar
+    mov x0, x21                  ; ELR
+    bl print_hex32
+    mov x0, #0x40                ; '@'
+    bl uart_putchar
+    mov x0, x22                  ; FAR
+    bl print_hex32
+    mov x0, #0x2C                ; ','
+    bl uart_putchar
+    mov x0, x23                  ; SP_EL0
+    bl print_hex32
+    mov x0, #0x2C                ; ','
+    bl uart_putchar
+    ldr x0, [sp, #240]           ; x30 from trap frame
+    bl print_hex32
+    mov x0, #0x2C                ; ','
+    bl uart_putchar
+    movz x9, #0x4030, lsl #16
+    ldr x0, [x9, #0x18]         ; next_file_address
+    bl print_hex32
+    mov x0, #0x0A
+    bl uart_putchar
     mov x9, #139
     str x9, [sp, #0]
     b syscall_exit
@@ -245,7 +279,6 @@ trap_handler:
 ; Dispatch syscall based on x8
 dispatch:
     ldr x8, [sp, #64]
-
     cmp x8, #64
     b.eq tramp_write
     cmp x8, #93
@@ -284,7 +317,6 @@ dispatch:
     cmp x8, #53
     b.eq tramp_stub
 
-    ; Unknown syscall
     movn x9, #0
     str x9, [sp, #0]
     b trap_exit
@@ -692,8 +724,8 @@ openat_do_create:
     ldr x23, [x9, #0x10]         ; x23 = next_filenum (our new file index)
 
     ; Copy filename to file names table
-    ; dest = 0x60020000 + x23 * 1024
-    movz x10, #0x6002, lsl #16
+    ; dest = 0x60900000 + x23 * 1024
+    movz x10, #0x6090, lsl #16
     lsl x11, x23, #10
     add x10, x10, x11            ; destination
     mov x11, x21                 ; source
@@ -830,6 +862,14 @@ syscall_chdir:
     bl absolute_path
     mov x21, x0
 
+    ; Special case: "/" always exists (skip find_file)
+    ldrb w9, [x21]
+    cmp w9, #0x2F
+    b.ne chdir_find
+    ldrb w9, [x21, #1]
+    cbz w9, chdir_copy_path        ; "/" alone -> skip find_file
+
+chdir_find:
     ; Find the file
     mov x0, x21
     bl find_file
@@ -843,6 +883,7 @@ syscall_chdir:
     ldr x10, [x9, #8]            ; file_length
     cbnz x10, chdir_fail         ; not a directory
 
+chdir_copy_path:
     ; Copy path to process current_dir
     bl get_process_base
     add x22, x0, #0x100          ; dest = proc->current_dir
@@ -1006,7 +1047,7 @@ mkdirat_do_create:
     ldr x23, [x9, #0x10]         ; next_filenum
 
     ; Copy name to file names table
-    movz x10, #0x6002, lsl #16   ; 0x60020000
+    movz x10, #0x6090, lsl #16   ; 0x60900000
     lsl x11, x23, #10
     add x10, x10, x11
     mov x11, x21
@@ -1076,7 +1117,7 @@ syscall_clone:
     str x9, [x21, #0x20]
 
     ; Save stack: copy from sp to kernel_stack_top (0x68000000)
-    movz x9, #0x6800, lsl #16    ; x9 = 0x68000000 (stack top)
+    movz x9, #0x7B80, lsl #16    ; x9 = 0x7B800000 (stack top)
     mov x10, sp                  ; x10 = current sp (can't use sp directly in sub reg)
     sub x10, x9, x10             ; x10 = stack length
 
@@ -1085,7 +1126,7 @@ syscall_clone:
     ldr x22, [x9, #0x28]         ; next_save_process_address
     str x22, [x21, #0x48]        ; save stack save address
 
-    movz x9, #0x6800, lsl #16
+    movz x9, #0x7B80, lsl #16
     mov x10, sp
     sub x10, x9, x10             ; stack length
     str x10, [x21, #0x50]        ; save stack length
@@ -1166,6 +1207,29 @@ clone_sp_ok:
     add x10, x10, x24
     str x10, [x9, #0x28]
 
+    ; Copy CWD from parent proc to child proc
+    ; Parent = proc[next_process_num-1], Child will be proc[next_process_num]
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0x20]         ; next_process_num
+    movz x9, #0x6040, lsl #16
+    movz x11, #0x1000
+    mul x12, x10, x11            ; child offset = next_process_num * 4096
+    sub x13, x10, #1
+    mul x13, x13, x11            ; parent offset = (next_process_num-1) * 4096
+    add x12, x9, x12             ; child proc base
+    add x13, x9, x13             ; parent proc base
+    ; Copy 256 bytes of CWD (offset +0x100)
+    add x12, x12, #0x100         ; child CWD
+    add x13, x13, #0x100         ; parent CWD
+    mov x14, #256
+clone_copy_cwd:
+    ldrb w15, [x13]
+    strb w15, [x12]
+    add x13, x13, #1
+    add x12, x12, #1
+    sub x14, x14, #1
+    cbnz x14, clone_copy_cwd
+
     ; Return 0 (child return from fork)
     str xzr, [sp, #0]
     b trap_exit
@@ -1179,11 +1243,31 @@ syscall_execve:
     ldr x22, [sp, #8]            ; argv (VA)
     ldr x23, [sp, #16]           ; envp (VA)
 
-    ; Translate all pointers VA -> PA
+    ; Translate all pointers VA -> PA (add 0x40000000 for Entry 1 kernel VA)
     movz x9, #0x4000, lsl #16
     add x21, x21, x9
     add x22, x22, x9
     add x23, x23, x9
+
+    ; Copy pathname to safe buffer at 0x60000400 (won't be zeroed by memset)
+    ; User memory at PA 0x00600000+ gets zeroed during execve, destroying pathname
+    mov x9, x21                  ; src = pathname (kernel VA)
+    movz x10, #0x6000, lsl #16
+    movk x10, #0x0400            ; dest = 0x60000400 (scratch+0x400)
+    mov x11, #1024               ; max copy length safety limit
+execve_copy_path:
+    ldrb w12, [x9]
+    strb w12, [x10]
+    add x9, x9, #1
+    add x10, x10, #1
+    cbz w12, execve_copy_done
+    sub x11, x11, #1
+    cbnz x11, execve_copy_path
+    strb wzr, [x10]              ; NUL-terminate if max length reached
+execve_copy_done:
+    ; x21 now points to safe copy
+    movz x21, #0x6000, lsl #16
+    movk x21, #0x0400
 
     ; Check if current process forked
     bl get_process_base
@@ -1232,7 +1316,6 @@ execve_count_args:
     add x9, x9, #8
     b execve_count_args
 execve_counted:
-
     ; String storage on user stack, growing DOWN from PA 0x50000000.
     movz x27, #0x5000, lsl #16   ; x27 = 0x50000000 (string storage PA)
 
@@ -1374,7 +1457,7 @@ execve_push_argc:
 
     ; --- Load ELF ---
     ; Resolve program name
-    mov x0, x21                  ; pathname
+    mov x0, x21
     bl absolute_path
     mov x21, x0
     mov x0, x21
@@ -1429,9 +1512,10 @@ execve_cwd_done:
 
     ldrh w23, [x28, #0x38]       ; e_phnum
 
-    ; Zero user process area: 2MB starting at PA 0x40600000
+    ; Zero user process area: 8MB starting at PA 0x40600000
+    ; Must clear beyond 2MB to zero stale heap data from previous processes
     movz x0, #0x4060, lsl #16
-    movz x1, #0x20, lsl #16      ; 0x200000 = 2MB
+    movz x1, #0x80, lsl #16      ; 0x800000 = 8MB
     bl memset_zero
 
     ; Reset brk to process base
@@ -1645,12 +1729,22 @@ wait4_no_write:
 ; x0 = character to print
 ;============================================================
 uart_putchar:
-    movz x9, #0xC900, lsl #16    ; VA 0xC9000000 -> PA 0x09000000 via Entry 3
+    sub sp, sp, #16
+    str x30, [sp]
+    movz x9, #0x4030, lsl #16
+    ldr x9, [x9, #0xA0]
 uart_wait:
-    ldr w10, [x9, #0x18]         ; FR register (flags)
+    bl uart_read_fr               ; bl/ret breaks TCG translation block
     and w10, w10, #0x20           ; bit 5 = TXFF (TX FIFO full)
     cbnz w10, uart_wait
     strb w0, [x9]                 ; write to DR
+    ldr x30, [sp]
+    add sp, sp, #16
+    ret
+
+; uart_read_fr: Read PL011 FR register (breaks TCG TB caching)
+uart_read_fr:
+    ldr w10, [x9, #0x18]
     ret
 
 ;============================================================
@@ -1761,9 +1855,30 @@ load_data_base:
 ; reboot: PSCI SYSTEM_RESET via HVC
 ;============================================================
 reboot:
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0xA8]         ; board_has_sdhci?
+    cbnz x10, reboot_raspi
+
+    ; Virt: PSCI SYSTEM_RESET via HVC
     movz x0, #0x0009
     movk x0, #0x8400, lsl #16    ; 0x84000009 = PSCI SYSTEM_RESET
     hvc #0
+    b reboot_hang
+
+reboot_raspi:
+    ; Raspi3b: BCM2835 PM watchdog reset
+    movz x9, #0x7F10, lsl #16    ; PM base VA = 0x7F100000 (PA 0x3F100000)
+    ; Set PM_RSTS to 0 (reset, not poweroff)
+    movz x10, #0x5A00, lsl #16   ; PM_PASSWORD
+    str w10, [x9, #0x20]         ; PM_RSTS = password | 0
+    ; Set PM_WDOG timeout
+    movz x10, #0x5A00, lsl #16
+    movk x10, #0x000A             ; PM_PASSWORD | 10 ticks
+    str w10, [x9, #0x24]         ; PM_WDOG
+    ; Trigger full reset
+    movz x10, #0x5A00, lsl #16
+    movk x10, #0x0020             ; PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET
+    str w10, [x9, #0x1C]         ; PM_RSTC
 reboot_hang:
     wfe
     b reboot_hang
@@ -1821,29 +1936,59 @@ read_stdin_byte:
     movz x9, #0x4030, lsl #16
     ldr x10, [x9, #0x38]         ; stdin_offset
 
-    ; If offset >= 512, read next sector
+    ; Check if pre-loaded buffer exists (raspi3b uses CMD18 preload)
+    ldr x11, [x9, #0x78]         ; stdin_buf_ptr (0 if no preload)
+    cbz x11, rsb_per_sector
+
+    ; --- Pre-loaded path (raspi3b) ---
+    ; If offset >= 512, advance to next sector in pre-loaded buffer
     cmp x10, #512
     b.lt rsb_have_data
+    add x11, x11, #512
+    ; Check if past preload end (0x42000000 + 16128*512 = 0x427E0000)
+    movz x12, #0x427E, lsl #16
+    cmp x11, x12
+    b.hs rsb_preload_exhausted
+    str x11, [x9, #0x78]
+    str xzr, [x9, #0x38]
+    mov x10, #0
+    b rsb_have_data
 
-    ; Read next sector into stdin buffer at 0x60010000
+rsb_preload_exhausted:
+    ; Switch from preload buffer to per-sector SDHCI reads
+    str xzr, [x9, #0x78]         ; stdin_buf_ptr = 0
+    mov x10, #512
+    str x10, [x9, #0x38]         ; stdin_offset = 512 (trigger sector read)
+    b rsb_per_sector
+
+rsb_per_sector:
+    ; --- Per-sector path (virt or post-preload fallback) ---
+    cmp x10, #512
+    b.lt rsb_have_data_sector
+    ; Read next sector via disk_read_sector
     ldr x0, [x9, #0x30]          ; sector number
     movz x1, #0x6001, lsl #16    ; buffer = 0x60010000
     bl disk_read_sector
-
-    ; Advance sector, reset offset
     movz x9, #0x4030, lsl #16
     ldr x10, [x9, #0x30]
     add x10, x10, #1
     str x10, [x9, #0x30]         ; stdin_sector++
     str xzr, [x9, #0x38]         ; stdin_offset = 0
     mov x10, #0
-
-rsb_have_data:
-    ; Read one byte from stdin buffer
+rsb_have_data_sector:
     movz x19, #0x6001, lsl #16
     add x19, x19, x10
     ldrb w0, [x19]
+    b rsb_update_offset
 
+rsb_have_data:
+    ; Read from pre-loaded stdin buffer
+    movz x9, #0x4030, lsl #16
+    ldr x19, [x9, #0x78]         ; current sector buffer pointer
+    add x19, x19, x10
+    ldrb w0, [x19]
+
+rsb_update_offset:
     ; Update stdin_offset
     movz x9, #0x4030, lsl #16
     ldr x10, [x9, #0x38]
@@ -1921,6 +2066,125 @@ setup_page_table:
     ldr x30, [sp]
     add sp, sp, #16
     ret
+
+;============================================================
+; _trampoline: Board-detection entry point
+;============================================================
+_trampoline:
+    adr x9, _trampoline
+    movz x10, #0x4000, lsl #16
+    cmp x9, x10
+    b.hs tramp_virt
+
+    ; --- Raspi3b: build L1+L2 page tables at PA 0x00200000, enable MMU ---
+    ; L1 at PA 0x200000 (32 bytes)
+    ; L2_0 at PA 0x201000 (4096 bytes) for Entry 0 (user+kernel)
+    ; L2_1 at PA 0x202000 (4096 bytes) for Entry 1 (kernel-only)
+    ; Use x12 (not x0 — x0 holds stdin_sector from stage1)
+    ; Zero 12KB (L1 + L2_0 + L2_1)
+    movz x12, #0x0020, lsl #16
+    movz x9, #0
+    movz x10, #0x3000
+tramp_zero:
+    str xzr, [x12, x9]
+    add x9, x9, #8
+    cmp x9, x10
+    b.lt tramp_zero
+
+    ; --- L1 table at PA 0x200000 ---
+    movz x12, #0x0020, lsl #16
+    ; Entry 0: TABLE → L2_0 at PA 0x201000
+    movz x9, #0x0020, lsl #16
+    movk x9, #0x1003
+    str x9, [x12, #0]
+    ; Entry 1: TABLE → L2_1 at PA 0x202000
+    movz x9, #0x0020, lsl #16
+    movk x9, #0x2003
+    str x9, [x12, #8]
+    ; Entry 2: 1GB Block, Normal WB, kernel-only (for file data at VA 0x80000000+)
+    movz x9, #0x0701
+    str x9, [x12, #16]
+
+    ; --- Fill L2_0 at PA 0x201000 (user+kernel) ---
+    ; Entries 0-503: Normal WB, kernel-only initially (0x0701)
+    ; Entries 504-511: Device nGnRE (0x0705)
+    movz x12, #0x0020, lsl #16
+    movk x12, #0x1000
+    movz x9, #0
+    movz x10, #0x0020, lsl #16
+tramp_l2_fill:
+    mul x11, x9, x10
+    cmp x9, #504
+    b.ge tramp_l2_device
+    movz x13, #0x0701
+    orr x11, x11, x13
+    b tramp_l2_store
+tramp_l2_device:
+    movz x13, #0x0705
+    orr x11, x11, x13
+tramp_l2_store:
+    lsl x13, x9, #3
+    str x11, [x12, x13]
+    add x9, x9, #1
+    cmp x9, #512
+    b.lt tramp_l2_fill
+
+    ; --- Copy L2_0 to L2_1 at PA 0x202000 (same content, kernel-only) ---
+    movz x9, #0x0020, lsl #16
+    movk x9, #0x1000             ; src = L2_0
+    movz x10, #0x0020, lsl #16
+    movk x10, #0x2000            ; dst = L2_1
+    movz x11, #0
+tramp_l2_copy:
+    ldr x12, [x9, x11]
+    str x12, [x10, x11]
+    add x11, x11, #8
+    cmp x11, #4096
+    b.lt tramp_l2_copy
+
+    movz x9, #0x04FF
+    msr mair_el1, x9
+    movz x9, #0x3519
+    msr tcr_el1, x9
+    movz x9, #0x0020, lsl #16
+    msr ttbr0_el1, x9
+    isb
+
+    mrs x9, sctlr_el1
+    orr x9, x9, #1
+    orr x9, x9, #4
+    orr x9, x9, #0x1000
+    msr sctlr_el1, x9
+    isb
+
+    ; Fix L2 entries 0-503: add AP_EL0 via kernel VA 0x40201000 (Entry 1 → PA 0x201000)
+    ; Change 0x0701 → 0x0741 (add bit 6 = AP_EL0)
+    ; MUST NOT use TLBI (hangs on raspi3b QEMU). DSB+ISB sufficient.
+    movz x9, #0x4020, lsl #16
+    movk x9, #0x1000             ; x9 = VA 0x40201000 (L2 table via Entry 1)
+    movz x10, #0
+tramp_fix_l2:
+    lsl x11, x10, #3             ; offset = index * 8
+    add x11, x9, x11
+    ldr x12, [x11]               ; current descriptor
+    orr x12, x12, #0x40          ; set bit 6 (AP_EL0)
+    str x12, [x11]
+    add x10, x10, #1
+    cmp x10, #504                ; only fix Normal WB entries, not Device
+    b.lt tramp_fix_l2
+    dsb sy
+    isb
+
+    ; Jump to main at VA (PA + 0x40000000 via Entry 1)
+    mov x27, #3                   ; board type = SDHCI (raspi3b)
+    adr x9, main
+    movz x10, #0x4000, lsl #16
+    add x9, x9, x10
+    br x9
+
+tramp_virt:
+    mov x27, #0                   ; board type = not SDHCI (virt)
+    b main
 
 ;============================================================
 ; strcmp: Compare two null-terminated strings
@@ -2122,14 +2386,14 @@ find_file:
     ldr x20, [x9, #0x10]         ; next_filenum
     sub x20, x20, #1             ; start from last file
 
-    ; File names base = 0x60020000
-    movz x21, #0x6002, lsl #16
+    ; File names base = 0x60900000
+    movz x21, #0x6090, lsl #16
 
 find_file_loop:
     cmp x20, #3
     b.lt find_file_not_found
 
-    ; filename address = 0x60020000 + file_index * 1024
+    ; filename address = 0x60900000 + file_index * 1024
     lsl x9, x20, #10
     add x0, x21, x9
     mov x1, x19
@@ -2903,6 +3167,66 @@ internalshell:
     str x24, [sp, #48]
     str x25, [sp, #56]
 
+    ; Pre-load stdin data using CMD18 (raspi3b only — SDHCI PIO)
+    ; On virt, skip preload (uses per-sector VirtIO reads)
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0xA8]         ; board_has_sdhci flag
+    cbz x10, shell_loop           ; skip preload if no SDHCI
+    ldr x22, [x9, #0x00]         ; SDHCI base
+    ; Read up to 16128 sectors (8MB) starting from stdin_sector into VA 0x42000000
+    ldr x20, [x9, #0x30]         ; stdin_sector
+    ; Store buffer pointer in globals+0x78
+    ; Set to buffer - 512 so first advance (triggered by offset=512) lands at buffer start
+    movz x10, #0x41FF, lsl #16
+    movk x10, #0xFE00             ; 0x42000000 - 512 = 0x41FFFE00
+    str x10, [x9, #0x78]
+    ; Set stdin_offset to 512 to trigger first advance
+    mov x10, #512
+    str x10, [x9, #0x38]
+    ; CMD18: multi-block read
+    movz w10, #0xFFFF
+    str w10, [x22, #0x30]
+    movz w10, #0x0200
+    strh w10, [x22, #0x04]        ; block size = 512
+    movz w10, #0x3F00
+    strh w10, [x22, #0x06]        ; block count = 16128
+    lsl w10, w20, #9
+    str w10, [x22, #0x08]         ; arg = stdin_sector * 512
+    ; CMD18 + multi-block + block count enable + read + auto CMD12
+    movz w10, #0x0036
+    movk w10, #0x123A, lsl #16
+    str w10, [x22, #0x0C]
+    ; PIO read all blocks
+    movz x19, #0x4200, lsl #16    ; buffer VA 0x42000000 (PA 0x02000000, slow but safe from file data)
+    movz x23, #0x3F00             ; 16128 blocks
+preload_block:
+    cbz x23, preload_done
+    ; Wait BRR for this block
+preload_brr:
+    bl sdhci_read_status
+    and w11, w10, #0x20
+    cbz w11, preload_brr
+    ; Read 128 words for this block
+    mov x20, #128
+preload_pio:
+    ldr w11, [x22, #0x20]
+    str w11, [x19]
+    add x19, x19, #4
+    sub x20, x20, #1
+    cbnz x20, preload_pio
+    sub x23, x23, #1
+    b preload_block
+preload_done:
+    ; Advance stdin_sector past preloaded data for per-sector fallback
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0x30]         ; stdin_sector
+    movz x11, #0x3F00             ; 16128
+    add x10, x10, x11
+    str x10, [x9, #0x30]         ; stdin_sector += 16128
+    ; Clear status
+    movz w10, #0xFFFF
+    str w10, [x22, #0x30]
+
 shell_loop:
     bl read_stdin_byte
     mov x19, x0
@@ -3022,7 +3346,7 @@ src_name_done:
     movz x9, #0x4030, lsl #16
     ldr x23, [x9, #0x10]
 
-    movz x10, #0x6002, lsl #16
+    movz x10, #0x6090, lsl #16
     lsl x11, x23, #10
     add x10, x10, x11
     mov x11, x22
@@ -3143,7 +3467,7 @@ hex0_output_done:
     movz x9, #0x4030, lsl #16
     ldr x24, [x9, #0x10]
 
-    movz x10, #0x6002, lsl #16
+    movz x10, #0x6090, lsl #16
     lsl x11, x24, #10
     add x10, x10, x11
     mov x11, x21
@@ -3467,6 +3791,204 @@ hoc_not_found:
 shell_return:
     b shell_loop
 
+; sdhci_read_status: Read SDHCI interrupt status (breaks TCG TB)
+; x22 = SDHCI base. Returns w10 = status.
+sdhci_read_status:
+    ldr w10, [x22, #0x30]
+    ret
+
+; sdhci_read_status9: Same but using x9 as base
+sdhci_read_status9:
+    ldr w10, [x9, #0x30]
+    ret
+
+; sdhci_cmd_wait: Wait for Command Complete (bit 0), clear status
+sdhci_cmd_wait:
+    sub sp, sp, #16
+    str x30, [sp]
+sdhci_cmd_wait_loop:
+    bl sdhci_read_status
+    and w11, w10, #1
+    cbz w11, sdhci_cmd_wait_loop
+    movz w10, #0xFFFF
+    str w10, [x22, #0x30]
+    ldr x30, [sp]
+    add sp, sp, #16
+    ret
+
+; sdhci_pio_read_word: Read one word from SDHCI data port
+; x9 = SDHCI base. Returns w11 = data word.
+sdhci_pio_read_word:
+    ldr w11, [x9, #0x20]
+    ret
+
+; sdhci_read_sector: Read one 512-byte sector via SDHCI PIO
+; x0 = sector number, x1 = destination buffer (VA)
+; to avoid QEMU TCG translation block caching of MMIO reads.
+sdhci_read_sector:
+    sub sp, sp, #32
+    str x30, [sp]
+    str x19, [sp, #8]
+    str x20, [sp, #16]
+    mov x20, x0                  ; sector number
+    mov x19, x1                  ; destination buffer
+    movz x9, #0x4030, lsl #16
+    ldr x22, [x9, #0x00]
+    ; CMD17 (clear only CC+BRR+TC bits, not all)
+    mov w10, #0x23
+    str w10, [x22, #0x30]
+    movz w10, #0x0200
+    strh w10, [x22, #0x04]
+    mov w10, #1
+    strh w10, [x22, #0x06]
+    lsl w10, w20, #9
+    str w10, [x22, #0x08]
+    movz w10, #0x0010
+    movk w10, #0x113A, lsl #16
+    str w10, [x22, #0x0C]
+    ; Wait BRR using bl sdhci_read_status (proven to work)
+sdhci_rs_brr:
+    bl sdhci_read_status
+    and w11, w10, #0x20
+    cbz w11, sdhci_rs_brr
+    ; PIO read 128 words
+    mov x20, #128
+sdhci_rs_pio:
+    ldr w11, [x22, #0x20]
+    str w11, [x19]
+    add x19, x19, #4
+    sub x20, x20, #1
+    cbnz x20, sdhci_rs_pio
+    ; Clear only CC+BRR+TC bits after PIO read
+    mov w10, #0x23
+    str w10, [x22, #0x30]
+    ldr x30, [sp]
+    ldr x19, [sp, #8]
+    ldr x20, [sp, #16]
+    add sp, sp, #32
+    ret
+
+; sdhci_reinit_card: Full CMD0-CMD16 re-init (x22 = SDHCI base)
+sdhci_reinit_card:
+    sub sp, sp, #16
+    str x30, [sp]
+    ; Software reset
+    mov w10, #1
+    strb w10, [x22, #0x2F]
+    movz w10, #0x0001
+    strh w10, [x22, #0x2C]
+sdhci_ric_clk:
+    ldrh w10, [x22, #0x2C]
+    and w10, w10, #2
+    cbz w10, sdhci_ric_clk
+    movz w10, #0x0005
+    strh w10, [x22, #0x2C]
+    mov w10, #0x0F
+    strb w10, [x22, #0x29]
+    mov w10, #0x0E
+    strb w10, [x22, #0x2E]
+    movz w10, #0xFFFF
+    str w10, [x22, #0x34]
+    str w10, [x22, #0x38]
+    ; CMD0
+    str wzr, [x22, #0x08]
+    str wzr, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD8
+    movz w10, #0x01AA
+    str w10, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x081A, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD55
+    str wzr, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x371A, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; ACMD41
+    movz w10, #0x8000
+    movk w10, #0x40FF, lsl #16
+    str w10, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x2902, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD2
+    str wzr, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x0209, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD3
+    str wzr, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x031A, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD7
+    ldr w10, [x22, #0x10]
+    and w10, w10, #0xFFFF0000
+    str w10, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x071A, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ; CMD16
+    movz w10, #0x200
+    str w10, [x22, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x101A, lsl #16
+    str w10, [x22, #0x0C]
+    bl sdhci_cmd_wait
+    ldr x30, [sp]
+    add sp, sp, #16
+    ret
+
+sdhci_write_sector:
+    sub sp, sp, #32
+    str x30, [sp]
+    str x19, [sp, #8]
+    str x20, [sp, #16]
+    mov x20, x0                  ; sector number
+    mov x19, x1                  ; source buffer
+    movz x9, #0x4030, lsl #16
+    ldr x9, [x9, #0x00]
+    movz w10, #0xFFFF
+    str w10, [x9, #0x30]
+    movz w10, #0x0200
+    strh w10, [x9, #0x04]
+    mov w10, #1
+    strh w10, [x9, #0x06]
+    lsl w10, w20, #9
+    str w10, [x9, #0x08]
+    movz w10, #0x0000
+    movk w10, #0x183A, lsl #16
+    str w10, [x9, #0x0C]
+sdhci_ws_bwr:
+    ldr w10, [x9, #0x30]
+    and w11, w10, #0x10
+    cbz w11, sdhci_ws_bwr
+    mov x10, #128
+sdhci_ws_pio:
+    ldr w11, [x19]
+    add x19, x19, #4
+    str w11, [x9, #0x20]
+    sub x10, x10, #1
+    cbnz x10, sdhci_ws_pio
+sdhci_ws_tc:
+    ldr w10, [x9, #0x30]
+    and w11, w10, #2
+    cbz w11, sdhci_ws_tc
+    movz w10, #0xFFFF
+    str w10, [x9, #0x30]
+    ldr x30, [sp]
+    ldr x19, [sp, #8]
+    ldr x20, [sp, #16]
+    add sp, sp, #32
+    ret
+
 ;============================================================
 ; flush_disk: Write /dev/hda file contents back to disk
 ;============================================================
@@ -3509,6 +4031,14 @@ flush_disk:
     ldr x19, [x9]
     ldr x20, [x9, #8]
 
+    ; Re-init SDHCI before writing (needed after CMD18 preload)
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0xA8]         ; board_has_sdhci?
+    cbz x10, flush_skip_reinit
+    ldr x22, [x9, #0x00]         ; SDHCI base
+    bl sdhci_reinit_card
+flush_skip_reinit:
+
     mov x21, #0
 flush_sector_loop:
     cmp x20, #0
@@ -3538,12 +4068,15 @@ main:
     ; Use SP_EL1 for kernel, then set it
     msr spsel, #1
     isb
-    movz x9, #0x6800, lsl #16
-    mov sp, x9                       ; SP_EL1 = 0x68000000
+    movz x9, #0x7B80, lsl #16
+    mov sp, x9                       ; SP_EL1 = 0x7B800000
 
     ; Save x0 = stdin_sector and x1 = DTB pointer
     mov x24, x0
     mov x25, x1
+    mov x26, x2
+    ; x27 is set by _trampoline (3=raspi3b, 0=virt) — do not use x3
+
 
     ; Load RAM base into x20
     bl load_ram_base
@@ -3555,23 +4088,69 @@ main:
     ; Disable all EL1 interrupts
     msr daifset, #0xF
 
+    ; Set UART base for non-raspi3b boards (virt: PA 0x09000000, Entry 3 VA 0xC9000000)
+    cmp x27, #3
+    b.eq init_sdhci
+    movz x9, #0xC900, lsl #16    ; virt UART VA via Entry 3
+    movz x10, #0x4030, lsl #16
+    str x9, [x10, #0xA0]
+
     ; Parse device tree
     mov x0, x25
     bl fdt_find_storage
-
     cmp x1, #1
     b.eq init_virtio
     cmp x1, #2
     b.eq init_spi_sd
     b reboot
+init_sdhci:
+    ; SDHCI and UART accessed via Entry 1 L2 Device entries (VA = PA + 0x40000000)
+    ; x26 = SDHCI PA from stage1 (0x3F300000)
+    movz x9, #0x4000, lsl #16
+    add x22, x26, x9             ; x22 = SDHCI VA via Entry 1 (0x7F300000)
+    and x9, x26, #0xFF000000
+    movz x10, #0x0020, lsl #16
+    movk x10, #0x1000
+    orr x9, x9, x10
+    movz x10, #0x4000, lsl #16
+    add x9, x9, x10              ; x9 = UART VA via Entry 1 (0x7F201000)
+    movz x10, #0x4030, lsl #16
+    str x9, [x10, #0xA0]         ; UART VA = 0x7F201000
+    str x22, [x10, #0x00]        ; SDHCI VA = 0x7F300000
 
+    ; Initialize PL011 UART properly
+    ; 1. Disable UART
+    str wzr, [x9, #0x30]
+    ; 2. Set UARTLCR_H: 8-bit word length (WLEN=11) + FIFO enable (FEN=1) = 0x70
+    movz w10, #0x70
+    str w10, [x9, #0x2C]
+    ; 3. Enable UART (UARTEN=1, TXE=1, RXE=1 = 0x301)
+    movz w10, #0x0301
+    str w10, [x9, #0x30]
+
+    ; No SDHCI re-init needed — stage1 already initialized the controller.
+    ; The Entry 3 VA (0xFF300000) maps to the same PA (0x3F300000) that stage1 used.
+    ; On raspi3b, MMU is already on — adr gives VA directly (no offset needed)
+    adr x9, sdhci_read_sector
+    movz x10, #0x4030, lsl #16
+    str x9, [x10, #0x88]
+    adr x9, sdhci_write_sector
+    movz x10, #0x4030, lsl #16
+    str x9, [x10, #0x90]
+    mov x9, #1
+    str x9, [x10, #0xA8]         ; board_has_sdhci = 1
+    b storage_ready
 init_virtio:
     bl virtio_init
+    ; Clear board_has_sdhci (only for non-SDHCI boards)
+    movz x9, #0x4030, lsl #16
+    str xzr, [x9, #0xA8]
     b storage_ready
-
 init_spi_sd:
     bl spi_sd_init
-
+    ; Clear board_has_sdhci (SPI+SD is not SDHCI)
+    movz x9, #0x4030, lsl #16
+    str xzr, [x9, #0xA8]
 storage_ready:
 
     ; Initialize global data
@@ -3580,17 +4159,21 @@ storage_ready:
     mov x10, #3
     str x10, [x9, #0x10]
 
-    movz x10, #0x9400, lsl #16
+    movz x10, #0xA190, lsl #16   ; file data start past file names end
     str x10, [x9, #0x18]
 
     mov x10, #1
     str x10, [x9, #0x20]
 
-    movz x10, #0x7000, lsl #16
+    movz x10, #0x7800, lsl #16   ; save area at VA 0x78000000 (PA 0x38000000)
     str x10, [x9, #0x28]
 
+    ; board_has_sdhci is set by init_sdhci or cleared by init_virtio — not touched here
     str xzr, [x9, #0x48]
     str xzr, [x9, #0x50]
+    str xzr, [x9, #0x78]         ; stdin_buf_ptr = 0 (no preload; raspi3b sets this later)
+    mov x10, #512
+    str x10, [x9, #0x38]         ; stdin_offset = 512 (trigger first sector read)
 
     str x25, [x9, #0x80]
 
@@ -3606,9 +4189,9 @@ storage_ready:
     movz x1, #0x10, lsl #12
     bl memset_zero
 
-    ; Zero file names area (8MB at 0x60020000)
-    movz x0, #0x6002, lsl #16
-    movz x1, #0x80, lsl #16
+    ; Zero file names area (16MB at 0x60900000)
+    movz x0, #0x6090, lsl #16
+    movz x1, #0x100, lsl #16
     bl memset_zero
 
     ; Zero file descriptors area (512KB at 0x60820000)
@@ -3628,13 +4211,22 @@ storage_ready:
     strb w10, [x9, #0x100]
     strb wzr, [x9, #0x101]
 
-    ; Set up page table
+    ; Set up page table (skip on raspi3b — trampoline already did it)
+    cmp x27, #3
+    b.eq skip_page_table
     bl setup_page_table
-
-    ; Enable MMU (stays on forever)
-    movz x9, #0x1005              ; M=1, C=1, I=1
+    ; Enable MMU (stays on forever) — preserve RES1 bits
+    mrs x9, sctlr_el1
+    orr x9, x9, #1
+    orr x9, x9, #4
+    orr x9, x9, #0x1000
     msr sctlr_el1, x9
     isb
+skip_page_table:
+
+    ; SDHCI re-init skipped — stage1's re-init left card in transfer state
+
+sdhci_reinit_done:
 
     ; Jump to internal shell
     b internalshell
