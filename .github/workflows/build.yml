@@ -15,11 +15,20 @@ env:
   QEMU_VERSION: "10.1.4"
 
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: fsfe/reuse-action@v5
+
   build-and-test:
+    needs: lint
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:
+          - arch: x86
+            board: bios
           - arch: riscv64
             board: virt
           - arch: riscv64
@@ -42,16 +51,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: qemu-local
-          key: qemu-riscv64-aarch64-${{ env.QEMU_VERSION }}
+          key: qemu-x86-riscv64-aarch64-${{ env.QEMU_VERSION }}
 
-      - name: Build QEMU (riscv64 + aarch64)
+      - name: Build QEMU (x86_64 + riscv64 + aarch64)
         if: steps.cache-qemu.outputs.cache-hit != 'true'
         run: |
           pip install meson
           git clone --depth 1 --branch v${{ env.QEMU_VERSION }} \
             https://gitlab.com/qemu-project/qemu.git /tmp/qemu-build
           cd /tmp/qemu-build
-          ./configure --target-list=riscv64-softmmu,aarch64-softmmu \
+          ./configure --target-list=x86_64-softmmu,riscv64-softmmu,aarch64-softmmu \
             --prefix=${{ github.workspace }}/qemu-local \
             --disable-docs --disable-gtk --disable-sdl \
             --disable-opengl --disable-virglrenderer
@@ -64,6 +73,7 @@ jobs:
 
       - name: Test
         run: >
+          QEMU_X86=qemu-local/bin/qemu-system-x86_64
           QEMU_RISCV64=qemu-local/bin/qemu-system-riscv64
           QEMU_AARCH64=qemu-local/bin/qemu-system-aarch64
           make test-${{ matrix.arch }}-${{ matrix.board }}
