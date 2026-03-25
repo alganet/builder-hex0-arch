@@ -100,7 +100,7 @@
 # Trap handler at offset 4 from binary start
 
 #:_start
-6f 20 40 39  # jal zero, main
+6f 20 40 38  # jal zero, main
 
 #============================================================
 # Trap handler (at offset 4 = address 0x80210004)
@@ -3877,12 +3877,6 @@ ef e0 5f bd  # call sbi_putchar
 23 38 91 00  # sd s1, 16(sp)
 23 3c 21 01  # sd s2, 24(sp)
 
-# Check enable_flush
-b7 02 18 40  # lui t0, 0x40180
-93 92 12 00  # slli t0, t0, 1
-03 b3 82 04  # ld t1, 0x48(t0)
-63 0a 03 08  # beqz t1, flush_done
-
 # Find /dev/hda
 37 05 00 50  # lui a0, 0x50000
 13 15 15 00  # slli a0, a0, 1
@@ -3903,7 +3897,7 @@ a3 02 55 00  # sb t0, 5(a0)
 93 02 10 06  # li t0, 0x61
 a3 03 55 00  # sb t0, 7(a0)
 23 04 05 00  # sb zero, 8(a0)
-ef e0 9f fe  # call find_file
+ef e0 9f ff  # call find_file
 63 40 05 04  # bltz a0, flush_done
 
 # Get file address and length
@@ -3922,7 +3916,7 @@ b3 82 62 00  # add t0, t0, t1
 # Write 512 bytes from s0 to disk sector s2
 13 05 09 00  # mv a0, s2
 93 05 04 00  # mv a1, s0
-ef f0 4f bd  # call disk_write_sector
+ef f0 4f be  # call disk_write_sector
 
 13 04 04 20  # addi s0, s0, 512
 93 84 04 e0  # addi s1, s1, -512
@@ -3950,7 +3944,7 @@ b7 02 00 54  # lui t0, 0x54000
 93 8b 05 00  # mv s7, a1
 
 # Load RAM base into s2 = 0x80210000
-ef e0 5f bf  # call load_ram_base
+ef e0 5f c0  # call load_ram_base
 
 # Set up trap handler early (before any MMIO access)
 93 02 49 00  # addi t0, s2, 4
@@ -3962,21 +3956,21 @@ ef e0 5f bf  # call load_ram_base
 
 # Parse device tree to find storage device
 13 85 0b 00  # mv a0, s7
-ef f0 0f 81  # call fdt_find_storage
+ef f0 0f 82  # call fdt_find_storage
 
 # Dispatch to appropriate storage driver
 93 02 10 00  # li t0, 1
 63 88 55 00  # beq a1, t0, init_virtio
 93 02 20 00  # li t0, 2
 63 88 55 00  # beq a1, t0, init_spi_sd
-6f e0 1f be  # j reboot
+6f e0 1f bf  # j reboot
 
 #:init_virtio
-ef f0 0f a0  # call virtio_init
+ef f0 0f a1  # call virtio_init
 6f 00 80 00  # j storage_ready
 
 #:init_spi_sd
-ef f0 8f e8  # call spi_sd_init
+ef f0 8f e9  # call spi_sd_init
 
 #:storage_ready
 
@@ -4027,19 +4021,19 @@ b7 02 18 40  # lui t0, 0x40180
 37 05 20 40  # lui a0, 0x40200
 13 15 15 00  # slli a0, a0, 1
 b7 05 01 00  # lui a1, 0x10
-ef e0 df b8  # call memset_zero
+ef e0 df b9  # call memset_zero
 
 # Zero file names area (8MB at 0x80800000)
 37 05 01 50  # lui a0, 0x50010
 13 15 15 00  # slli a0, a0, 1
 b7 05 80 00  # lui a1, 0x800
-ef e0 df b7  # call memset_zero
+ef e0 df b8  # call memset_zero
 
 # Zero file descriptors area (512KB at 0x81000000)
 37 05 41 50  # lui a0, 0x50410
 13 15 15 00  # slli a0, a0, 1
 b7 05 08 00  # lui a1, 0x80
-ef e0 df b6  # call memset_zero
+ef e0 df b7  # call memset_zero
 
 # Set process 0 current_dir = "/"
 b7 02 20 40  # lui t0, 0x40200
@@ -4059,7 +4053,7 @@ a3 80 02 10  # sb zero, 0x101(t0)
 73 90 52 10  # csrrw zero, stvec, t0
 
 # Set up Sv39 page table
-ef e0 5f c3  # call setup_page_table
+ef e0 5f c4  # call setup_page_table
 
 # Jump to internal shell
-6f f0 4f f0  # j internalshell
+6f f0 4f f1  # j internalshell

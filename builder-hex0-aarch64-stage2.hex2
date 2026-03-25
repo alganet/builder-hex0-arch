@@ -2177,14 +2177,14 @@ DF3F03D5  # isb
 
     ; Jump to main at VA (PA + 0x40000000 via Entry 1)
 7B0080D2  # mov x27, #3 # board type = SDHCI (raspi3b)
-69A90010  # adr x9, main
+09A90010  # adr x9, main
 0A00A8D2  # movz x10, #0x4000, lsl #16
 29010A8B  # add x9, x9, x10
 20011FD6  # br x9
 
 :tramp_virt
 1B0080D2  # mov x27, #0 # board type = not SDHCI (virt)
-46050014  # b main
+43050014  # b main
 
 ;============================================================
 ; strcmp: Compare two null-terminated strings
@@ -3999,10 +3999,6 @@ F30700F9  # str x19, [sp, #8]
 F40B00F9  # str x20, [sp, #16]
 F50F00F9  # str x21, [sp, #24]
 
-0906A8D2  # movz x9, #0x4030, lsl #16
-2A2540F9  # ldr x10, [x9, #0x48]
-4A0500B4  # cbz x10, flush_done
-
 0000ACD2  # movz x0, #0x6000, lsl #16
 E90580D2  # mov w9, #0x2F
 09000039  # strb w9, [x0]
@@ -4021,7 +4017,7 @@ E90580D2  # mov w9, #0x2F
 290C80D2  # mov w9, #0x61
 091C0039  # strb w9, [x0, #7]
 1F200039  # strb wzr, [x0, #8]
-56FBFF97  # bl find_file
+59FBFF97  # bl find_file
 1F0000F1  # cmp x0, #0
 AB020054  # b.lt flush_done
 
@@ -4036,7 +4032,7 @@ AB020054  # b.lt flush_done
 2A5540F9  # ldr x10, [x9, #0xA8] # board_has_sdhci?
 6A0000B4  # cbz x10, flush_skip_reinit
 360140F9  # ldr x22, [x9, #0x00] # SDHCI base
-73FFFF97  # bl sdhci_reinit_card
+76FFFF97  # bl sdhci_reinit_card
 :flush_skip_reinit
 
 150080D2  # mov x21, #0
@@ -4046,7 +4042,7 @@ AB020054  # b.lt flush_done
 
 E00315AA  # mov x0, x21
 E10313AA  # mov x1, x19
-51FCFF97  # bl disk_write_sector
+54FCFF97  # bl disk_write_sector
 
 73020891  # add x19, x19, #512
 940208D1  # sub x20, x20, #512
@@ -4079,10 +4075,10 @@ FA0302AA  # mov x26, x2
 
 
     ; Load RAM base into x20
-F2F9FF97  # bl load_ram_base
+F5F9FF97  # bl load_ram_base
 
     ; Set up exception vector table
-C97EFE10  # adr x9, exception_vectors
+297FFE10  # adr x9, exception_vectors
 09C018D5  # msr vbar_el1, x9
 
     ; Disable all EL1 interrupts
@@ -4097,12 +4093,12 @@ DF4F03D5  # msr daifset, #0xF
 
     ; Parse device tree
 E00319AA  # mov x0, x25
-51FBFF97  # bl fdt_find_storage
+54FBFF97  # bl fdt_find_storage
 3F0400F1  # cmp x1, #1
 A0030054  # b.eq init_virtio
 3F0800F1  # cmp x1, #2
 E0030054  # b.eq init_spi_sd
-E7F9FF17  # b reboot
+EAF9FF17  # b reboot
 :init_sdhci
     ; SDHCI and UART accessed via Entry 1 L2 Device entries (VA = PA + 0x40000000)
     ; x26 = SDHCI PA from stage1 (0x3F300000)
@@ -4131,23 +4127,23 @@ E7F9FF17  # b reboot
     ; No SDHCI re-init needed — stage1 already initialized the controller.
     ; The Entry 3 VA (0xFF300000) maps to the same PA (0x3F300000) that stage1 used.
     ; On raspi3b, MMU is already on — adr gives VA directly (no offset needed)
-09E3FF10  # adr x9, sdhci_read_sector
+69E3FF10  # adr x9, sdhci_read_sector
 0A06A8D2  # movz x10, #0x4030, lsl #16
 494500F9  # str x9, [x10, #0x88]
-29EFFF10  # adr x9, sdhci_write_sector
+89EFFF10  # adr x9, sdhci_write_sector
 0A06A8D2  # movz x10, #0x4030, lsl #16
 494900F9  # str x9, [x10, #0x90]
 290080D2  # mov x9, #1
 495500F9  # str x9, [x10, #0xA8] # board_has_sdhci = 1
 08000014  # b storage_ready
 :init_virtio
-BFFBFF97  # bl virtio_init
+C2FBFF97  # bl virtio_init
     ; Clear board_has_sdhci (only for non-SDHCI boards)
 0906A8D2  # movz x9, #0x4030, lsl #16
 3F5500F9  # str xzr, [x9, #0xA8]
 04000014  # b storage_ready
 :init_spi_sd
-DCFCFF97  # bl spi_sd_init
+DFFCFF97  # bl spi_sd_init
     ; Clear board_has_sdhci (SPI+SD is not SDHCI)
 0906A8D2  # movz x9, #0x4030, lsl #16
 3F5500F9  # str xzr, [x9, #0xA8]
@@ -4187,17 +4183,17 @@ DCFCFF97  # bl spi_sd_init
     ; Zero process descriptors (64KB at 0x60400000)
 0008ACD2  # movz x0, #0x6040, lsl #16
 010280D2  # movz x1, #0x10, lsl #12
-C2F9FF97  # bl memset_zero
+C5F9FF97  # bl memset_zero
 
     ; Zero file names area (16MB at 0x60900000)
 0012ACD2  # movz x0, #0x6090, lsl #16
 0120A0D2  # movz x1, #0x100, lsl #16
-BFF9FF97  # bl memset_zero
+C2F9FF97  # bl memset_zero
 
     ; Zero file descriptors area (512KB at 0x60820000)
 4010ACD2  # movz x0, #0x6082, lsl #16
 0101A0D2  # movz x1, #0x8, lsl #16
-BCF9FF97  # bl memset_zero
+BFF9FF97  # bl memset_zero
 
     ; Set process 0 current_dir = "/"
 0908ACD2  # movz x9, #0x6040, lsl #16
@@ -4214,7 +4210,7 @@ EA0580D2  # mov w10, #0x2F
     ; Set up page table (skip on raspi3b — trampoline already did it)
 7F0F00F1  # cmp x27, #3
 00010054  # b.eq skip_page_table
-F2F9FF97  # bl setup_page_table
+F5F9FF97  # bl setup_page_table
     ; Enable MMU (stays on forever) — preserve RES1 bits
 091038D5  # mrs x9, sctlr_el1
 290140B2  # orr x9, x9, #1
@@ -4229,4 +4225,4 @@ DF3F03D5  # isb
 :sdhci_reinit_done
 
     ; Jump to internal shell
-F6FCFF17  # b internalshell
+F9FCFF17  # b internalshell

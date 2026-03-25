@@ -3870,12 +3870,6 @@ flush_disk:
     sd s1, 16(sp)
     sd s2, 24(sp)
 
-    # Check enable_flush
-    lui t0, 0x40180
-    slli t0, t0, 1
-    ld t1, 0x48(t0)
-    beqz t1, flush_done
-
     # Find /dev/hda
     lui a0, 0x50000
     slli a0, a0, 1           # scratch = 0xA0000000

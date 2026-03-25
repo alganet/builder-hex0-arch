@@ -3999,10 +3999,6 @@ flush_disk:
     str x20, [sp, #16]
     str x21, [sp, #24]
 
-    movz x9, #0x4030, lsl #16
-    ldr x10, [x9, #0x48]
-    cbz x10, flush_done
-
     movz x0, #0x6000, lsl #16
     mov w9, #0x2F
     strb w9, [x0]
