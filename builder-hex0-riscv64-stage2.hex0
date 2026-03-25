@@ -100,7 +100,7 @@
 # Trap handler at offset 4 from binary start
 
 #:_start
-6f 20 40 38  # jal zero, main
+6f 20 c0 38  # jal zero, main
 
 #============================================================
 # Trap handler (at offset 4 = address 0x80210004)
@@ -128,7 +128,7 @@ b7 02 f8 53  # lui t0, 0x53F80
 23 38 91 00  # sd s1, 16(sp)
 13 04 03 00  # mv s0, t1
 f3 24 00 14  # csrrs s1, sscratch, zero
-6f 00 10 77  # j reboot
+6f 00 90 77  # j reboot
 #:trap_sp_ok
 # Allocate trap frame (256 bytes = 32 slots of 8 bytes)
 13 01 01 f0  # addi sp, sp, -256
@@ -175,10 +175,12 @@ f3 22 10 14  # csrrs t0, sepc, zero
 # Check scause == 8 (ecall from U-mode)
 f3 22 20 14  # csrrs t0, scause, zero
 13 03 80 00  # li t1, 8
-63 84 62 00  # beq t0, t1, dispatch
+63 88 62 00  # beq t0, t1, dispatch
 
-# Not ecall from U-mode: halt
-6f 00 50 6d  # j reboot
+# Not ecall from U-mode: terminate process with exit code 139
+93 02 b0 08  # li t0, 139
+23 34 51 04  # sd t0, 72(sp)
+6f 00 50 49  # j syscall_exit
 
 # Dispatch syscall based on a7
 #:dispatch

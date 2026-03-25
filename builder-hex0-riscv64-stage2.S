@@ -177,8 +177,10 @@ trap_sp_ok:
     li t1, 8
     beq t0, t1, dispatch
 
-    # Not ecall from U-mode: halt
-    j reboot
+    # Not ecall from U-mode: terminate process with exit code 139
+    li t0, 139
+    sd t0, 72(sp)
+    j syscall_exit
 
 # Dispatch syscall based on a7
 dispatch:

@@ -177,8 +177,10 @@ $reboot 6F000000  # j reboot
 .00030000 .00008000 13000000  # li t1, 8
 .00800200 .00006000 @dispatch 63000000  # beq t0, t1, dispatch
 
-# Not ecall from U-mode: halt
-$reboot 6F000000  # j reboot
+# Not ecall from U-mode: terminate process with exit code 139
+.80020000 .0000B008 13000000  # li t0, 139
+.00000100 .00005000 .00040004 23300000  # sd t0, 72(sp)
+$syscall_exit 6F000000  # j syscall_exit
 
 # Dispatch syscall based on a7
 :dispatch
