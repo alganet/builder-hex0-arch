@@ -517,6 +517,16 @@ syscall_brk:
     movz x12, #0x4000, lsl #16
     add x9, x9, x12              ; PA = new brk
 
+    ; Cap at user-space limit (0x4FF00000, leaves 1MB for user stack
+    ; growing down from PA 0x50000000). Without this cap, large brk
+    ; requests (e.g. mes's default 64-bit M2 arena ~480MB) walked the
+    ; zero-loop past 0x50000000 into save area, page table, and kernel
+    ; structures, causing untraceable corruption traps. Linux brk(2)
+    ; returns the CURRENT brk on failure (not -1), so do the same here.
+    movz x13, #0x4FF0, lsl #16   ; PA cap = 0x4FF00000
+    cmp x9, x13
+    b.hi brk_return_current
+
     ; Zero memory from old brk to new brk if extending
     cmp x11, x9
     b.ge brk_store
@@ -2272,6 +2282,33 @@ abs_copy_input:
     b abs_copy_input
 
 abs_done:
+    ; Collapse consecutive '/' to single '/' (mirrors x86 stage2's behaviour
+    ; in builder-hex0-x86-stage2.hex0 strcpy_path_loop). mes's
+    ; include-from-path macro builds paths via
+    ; (string-append %moduledir "/" file) where %moduledir already ends
+    ; with "/", producing "...module//srfi/srfi-16.scm". Stage2 stores
+    ; created files with single-slash form, so without this normalisation
+    ; find_file's strcmp would never match and access(R_OK) returns ENOENT.
+    mov x19, x21                 ; src cursor
+    mov x20, x21                 ; dst cursor
+    mov w11, #0                  ; last_char = 0
+abs_collapse_loop:
+    ldrb w9, [x19]
+    cbz w9, abs_collapse_done
+    cmp w9, #0x2F                ; '/'
+    b.ne abs_collapse_write
+    cmp w11, #0x2F               ; previous char also '/'?
+    b.eq abs_collapse_skip
+abs_collapse_write:
+    strb w9, [x20]
+    add x20, x20, #1
+    mov w11, w9
+abs_collapse_skip:
+    add x19, x19, #1
+    b abs_collapse_loop
+abs_collapse_done:
+    strb wzr, [x20]              ; null-terminate
+
     ; Normalize: resolve /../ sequences in-place
     mov x19, x21                 ; x19 = scan pointer
 abs_norm_scan:
