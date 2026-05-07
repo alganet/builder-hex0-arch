@@ -122,7 +122,7 @@
 ;   offset 264: padding (alignment)
 
 #:_start
-6d 08 00 14  # b _trampoline
+70 08 00 14  # b _trampoline
 
 ;============================================================
 ; Exception vector table (must be 2KB aligned)
@@ -132,55 +132,55 @@
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 2048 (2044 bytes padding)
 #:exception_vectors
     ; Current EL with SP_EL0 - Synchronous
-ff 05 00 14  # b reboot
+02 06 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - IRQ
-df 05 00 14  # b reboot
+e2 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - FIQ
-bf 05 00 14  # b reboot
+c2 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - SError
-9f 05 00 14  # b reboot
+a2 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Current EL with SP_ELx - Synchronous
-7f 05 00 14  # b reboot
+82 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - IRQ
-5f 05 00 14  # b reboot
+62 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - FIQ
-3f 05 00 14  # b reboot
+42 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - SError
-1f 05 00 14  # b reboot
+22 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch64 - Synchronous (SVC handler) - offset 0x400
 00 01 00 14  # b trap_handler
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - IRQ
-df 04 00 14  # b reboot
+e2 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - FIQ
-bf 04 00 14  # b reboot
+c2 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - SError
-9f 04 00 14  # b reboot
+a2 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch32 - Synchronous
-7f 04 00 14  # b reboot
+82 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - IRQ
-5f 04 00 14  # b reboot
+62 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - FIQ
-3f 04 00 14  # b reboot
+42 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - SError
-1f 04 00 14  # b reboot
+22 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
 ;============================================================
@@ -246,35 +246,35 @@ e9 83 00 f9  # str x9, [sp, #256]
 16 60 38 d5  # mrs x22, far_el1
 17 41 38 d5  # mrs x23, sp_el0
 20 04 80 d2  # mov x0, #0x21 # '!'
-80 03 00 94  # bl uart_putchar
+83 03 00 94  # bl uart_putchar
 80 fe 5a d3  # lsr x0, x20, #26 # exception class
-91 03 00 94  # bl print_hex_byte
+94 03 00 94  # bl print_hex_byte
 40 07 80 d2  # mov x0, #0x3A
-7c 03 00 94  # bl uart_putchar
+7f 03 00 94  # bl uart_putchar
 e0 03 15 aa  # mov x0, x21 # ELR
-9b 03 00 94  # bl print_hex32
+9e 03 00 94  # bl print_hex32
 00 08 80 d2  # mov x0, #0x40 # '@'
-78 03 00 94  # bl uart_putchar
+7b 03 00 94  # bl uart_putchar
 e0 03 16 aa  # mov x0, x22 # FAR
-97 03 00 94  # bl print_hex32
+9a 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-74 03 00 94  # bl uart_putchar
+77 03 00 94  # bl uart_putchar
 e0 03 17 aa  # mov x0, x23 # SP_EL0
-93 03 00 94  # bl print_hex32
+96 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-70 03 00 94  # bl uart_putchar
+73 03 00 94  # bl uart_putchar
 e0 7b 40 f9  # ldr x0, [sp, #240] # x30 from trap frame
-8f 03 00 94  # bl print_hex32
+92 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-6c 03 00 94  # bl uart_putchar
+6f 03 00 94  # bl uart_putchar
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 20 0d 40 f9  # ldr x0, [x9, #0x18] # next_file_address
-8a 03 00 94  # bl print_hex32
+8d 03 00 94  # bl print_hex32
 40 01 80 d2  # mov x0, #0x0A
-67 03 00 94  # bl uart_putchar
+6a 03 00 94  # bl uart_putchar
 69 11 80 d2  # mov x9, #139
 e9 03 00 f9  # str x9, [sp, #0]
-23 03 00 14  # b syscall_exit
+26 03 00 14  # b syscall_exit
 
 ; Dispatch syscall based on x8
 #:dispatch
@@ -325,35 +325,35 @@ e9 03 00 f9  # str x9, [sp, #0]
 #:tramp_write
 37 00 00 14  # b syscall_write
 #:tramp_exit
-f8 02 00 14  # b syscall_exit
+fb 02 00 14  # b syscall_exit
 #:tramp_brk
 66 00 00 14  # b syscall_brk
 #:tramp_read
-7b 00 00 14  # b syscall_read
+7e 00 00 14  # b syscall_read
 #:tramp_openat
-ba 00 00 14  # b syscall_openat
+bd 00 00 14  # b syscall_openat
 #:tramp_close
-07 01 00 14  # b syscall_close
+0a 01 00 14  # b syscall_close
 #:tramp_lseek
-0e 01 00 14  # b syscall_lseek
+11 01 00 14  # b syscall_lseek
 #:tramp_chdir
-28 01 00 14  # b syscall_chdir
+2b 01 00 14  # b syscall_chdir
 #:tramp_getcwd
-52 01 00 14  # b syscall_getcwd
+55 01 00 14  # b syscall_getcwd
 #:tramp_faccessat
-74 01 00 14  # b syscall_faccessat
+77 01 00 14  # b syscall_faccessat
 #:tramp_mkdirat
-80 01 00 14  # b syscall_mkdirat
+83 01 00 14  # b syscall_mkdirat
 #:tramp_clone
-b8 01 00 14  # b syscall_clone
+bb 01 00 14  # b syscall_clone
 #:tramp_execve
-11 02 00 14  # b syscall_execve
+14 02 00 14  # b syscall_execve
 #:tramp_waitid
-18 03 00 14  # b syscall_waitid
+1b 03 00 14  # b syscall_waitid
 #:tramp_wait4
-21 03 00 14  # b syscall_wait4
+24 03 00 14  # b syscall_wait4
 #:tramp_stub
-b2 01 00 14  # b syscall_stub_zero
+b5 01 00 14  # b syscall_stub_zero
 
 ;============================================================
 ; trap_exit: Restore all registers and eret
@@ -435,7 +435,7 @@ bf 0e 00 f1  # cmp x21, #3
 #:write_loop
 d7 00 00 b4  # cbz x23, write_done
 c0 02 40 39  # ldrb w0, [x22]
-f8 02 00 94  # bl uart_putchar
+fb 02 00 94  # bl uart_putchar
 d6 06 00 91  # add x22, x22, #1
 f7 06 00 d1  # sub x23, x23, #1
 fb ff ff 17  # b write_loop
@@ -448,7 +448,7 @@ c9 ff ff 17  # b trap_exit
     ; x21=fd, x22=buf, x23=count, x24=original count
     ; Get file info from process fd table
 e0 03 15 aa  # mov x0, x21
-9b 04 00 94  # bl fd_to_file_index
+ad 04 00 94  # bl fd_to_file_index
 f9 03 00 aa  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -459,7 +459,7 @@ f9 03 00 aa  # mov x25, x0 # x25 = global file index
 5c 07 40 f9  # ldr x28, [x26, #8] # file_length
 
     ; Get current_offset from process fd
-06 04 00 94  # bl get_process_base
+09 04 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200
 a9 f2 7d d3  # lsl x9, x21, #3
 13 00 09 8b  # add x19, x0, x9 # x19 = &open_files[fd]
@@ -511,11 +511,21 @@ e9 03 40 f9  # ldr x9, [sp, #0] # requested addr (VA, or 0)
 0a 06 a8 d2  # movz x10, #0x4030, lsl #16
 4b 21 40 f9  # ldr x11, [x10, #0x40] # current brk (PA)
 
-e9 01 00 b4  # cbz x9, brk_return_current
+49 02 00 b4  # cbz x9, brk_return_current
 
     ; Convert VA to PA: PA = VA + 0x40000000
 0c 00 a8 d2  # movz x12, #0x4000, lsl #16
 29 01 0c 8b  # add x9, x9, x12 # PA = new brk
+
+    ; Cap at user-space limit (0x4FF00000, leaves 1MB for user stack
+    ; growing down from PA 0x50000000). Without this cap, large brk
+    ; requests (e.g. mes's default 64-bit M2 arena ~480MB) walked the
+    ; zero-loop past 0x50000000 into save area, page table, and kernel
+    ; structures, causing untraceable corruption traps. Linux brk(2)
+    ; returns the CURRENT brk on failure (not -1), so do the same here.
+0d fe a9 d2  # movz x13, #0x4FF0, lsl #16 # PA cap = 0x4FF00000
+3f 01 0d eb  # cmp x9, x13
+a8 01 00 54  # b.hi brk_return_current
 
     ; Zero memory from old brk to new brk if extending
 7f 01 09 eb  # cmp x11, x9
@@ -533,14 +543,14 @@ fc ff ff 17  # b brk_zero_loop
     ; Return VA to user
 29 01 0c cb  # sub x9, x9, x12
 e9 03 00 f9  # str x9, [sp, #0]
-97 ff ff 17  # b trap_exit
+94 ff ff 17  # b trap_exit
 
 #:brk_return_current
     ; Return current brk as VA = PA - 0x40000000
 0c 00 a8 d2  # movz x12, #0x4000, lsl #16
 6b 01 0c cb  # sub x11, x11, x12
 eb 03 00 f9  # str x11, [sp, #0]
-93 ff ff 17  # b trap_exit
+90 ff ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_read: read(fd, buf, count) -> bytes_read
@@ -577,7 +587,7 @@ d5 03 00 b5  # cbnz x21, read_file # if fd != 0, read from file
     ; Read next sector
 e0 03 0a aa  # mov x0, x10 # sector number
 21 00 ac d2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
-44 05 00 94  # bl disk_read_sector
+53 05 00 94  # bl disk_read_sector
     ; Advance sector, reset offset
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 2a 19 40 f9  # ldr x10, [x9, #0x30]
@@ -607,13 +617,13 @@ e6 ff ff 17  # b read_stdin_loop
 
 #:read_stdin_done
 f8 03 00 f9  # str x24, [sp, #0] # return original count
-6f ff ff 17  # b trap_exit
+6c ff ff 17  # b trap_exit
 
 #:read_file
     ; x21=fd, x22=buf, x23=count
     ; Get file info from process fd table
 e0 03 15 aa  # mov x0, x21
-41 04 00 94  # bl fd_to_file_index
+50 04 00 94  # bl fd_to_file_index
 f9 03 00 aa  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -655,7 +665,7 @@ f6 ff ff 17  # b read_file_loop
 
     ; Return bytes read
 f8 03 00 f9  # str x24, [sp, #0]
-53 ff ff 17  # b trap_exit
+50 ff ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_openat: openat(dirfd, pathname, flags, mode)
@@ -681,7 +691,7 @@ e9 00 00 b5  # cbnz x9, openat_create
 
     ; Open existing file
 e0 03 15 aa  # mov x0, x21
-00 04 00 94  # bl find_file
+0f 04 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
 eb 07 00 54  # b.lt openat_fail
 f7 03 00 aa  # mov x23, x0 # x23 = file index
@@ -713,7 +723,7 @@ f9 03 0a aa  # mov x25, x10 # save slash position
 38 03 40 39  # ldrb w24, [x25]
 3f 03 00 39  # strb wzr, [x25]
 e0 03 15 aa  # mov x0, x21
-ec 03 00 94  # bl find_file
+fb 03 00 94  # bl find_file
 38 03 00 39  # strb w24, [x25] # restore slash
 1f 00 00 f1  # cmp x0, #0
 4b 05 00 54  # b.lt openat_fail
@@ -780,12 +790,12 @@ f9 ff ff 17  # b openat_find_fd
 7f 05 00 b9  # str wzr, [x11, #4] # current_offset = 0
     ; Return fd
 e9 03 00 f9  # str x9, [sp, #0]
-08 ff ff 17  # b trap_exit
+05 ff ff 17  # b trap_exit
 
 #:openat_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-05 ff ff 17  # b trap_exit
+02 ff ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_close: close(fd) -> 0
@@ -801,7 +811,7 @@ a9 f2 7d d3  # lsl x9, x21, #3
 1f 00 00 b9  # str wzr, [x0] # clear slot (mark free)
 
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-fd fe ff 17  # b trap_exit
+fa fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_lseek: lseek(fd, offset, whence) -> new_offset
@@ -821,7 +831,7 @@ a9 f2 7d d3  # lsl x9, x21, #3
 97 00 00 b5  # cbnz x23, lseek_not_set
 16 07 00 b9  # str w22, [x24, #4]
 f6 03 00 f9  # str x22, [sp, #0]
-f2 fe ff 17  # b trap_exit
+ef fe ff 17  # b trap_exit
 
 #:lseek_not_set
 ff 06 00 f1  # cmp x23, #1
@@ -832,7 +842,7 @@ c1 00 00 54  # b.ne lseek_end
 29 01 16 8b  # add x9, x9, x22
 09 07 00 b9  # str w9, [x24, #4]
 e9 03 00 f9  # str x9, [sp, #0]
-eb fe ff 17  # b trap_exit
+e8 fe ff 17  # b trap_exit
 
 #:lseek_end
     ; SEEK_END (whence == 2)
@@ -844,7 +854,7 @@ eb fe ff 17  # b trap_exit
 29 01 16 8b  # add x9, x9, x22 # length + offset
 09 07 00 b9  # str w9, [x24, #4]
 e9 03 00 f9  # str x9, [sp, #0]
-e2 fe ff 17  # b trap_exit
+df fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_chdir: chdir(path) -> 0 or -1
@@ -872,7 +882,7 @@ a9 06 40 39  # ldrb w9, [x21, #1]
 #:chdir_find
     ; Find the file
 e0 03 15 aa  # mov x0, x21
-8d 03 00 94  # bl find_file
+9c 03 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
 4b 03 00 54  # b.lt chdir_fail
 
@@ -910,12 +920,12 @@ eb 05 80 d2  # mov w11, #0x2F
 5f 01 00 39  # strb wzr, [x10]
 #:chdir_ok
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-ba fe ff 17  # b trap_exit
+b7 fe ff 17  # b trap_exit
 
 #:chdir_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-b7 fe ff 17  # b trap_exit
+b4 fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_getcwd: getcwd(buf, size) -> buf or -1
@@ -971,7 +981,7 @@ fb ff ff 17  # b getcwd_copy
 09 00 a8 d2  # movz x9, #0x4000, lsl #16
 a9 02 09 cb  # sub x9, x21, x9 # VA = PA - 0x40000000
 e9 03 00 f9  # str x9, [sp, #0] # return buf (VA)
-94 fe ff 17  # b trap_exit
+91 fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_faccessat: faccessat(dirfd, pathname, mode, flags)
@@ -987,16 +997,16 @@ b5 02 09 8b  # add x21, x21, x9
 
 e0 03 15 aa  # mov x0, x21
 dc 02 00 94  # bl absolute_path
-46 03 00 94  # bl find_file
+55 03 00 94  # bl find_file
 
 1f 00 00 f1  # cmp x0, #0
 6b 00 00 54  # b.lt faccessat_fail
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-8a fe ff 17  # b trap_exit
+87 fe ff 17  # b trap_exit
 #:faccessat_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-87 fe ff 17  # b trap_exit
+84 fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_mkdirat: mkdirat(dirfd, pathname, mode)
@@ -1036,7 +1046,7 @@ f9 03 0a aa  # mov x25, x10 # save slash position
 38 03 40 39  # ldrb w24, [x25]
 3f 03 00 39  # strb wzr, [x25]
 e0 03 15 aa  # mov x0, x21
-29 03 00 94  # bl find_file
+38 03 00 94  # bl find_file
 38 03 00 39  # strb w24, [x25] # restore slash
 1f 00 00 f1  # cmp x0, #0
 8b 03 00 54  # b.lt mkdirat_fail
@@ -1078,19 +1088,19 @@ ea ee 7c d3  # lsl x10, x23, #4
 4b 09 00 f9  # str x11, [x10, #0x10]
 
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-53 fe ff 17  # b trap_exit
+50 fe ff 17  # b trap_exit
 
 #:mkdirat_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-50 fe ff 17  # b trap_exit
+4d fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_stub_zero: Return 0 for unimplemented stubs
 ;============================================================
 #:syscall_stub_zero
 ff 03 00 f9  # str xzr, [sp, #0]
-4e fe ff 17  # b trap_exit
+4b fe ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_clone: clone/fork simulation
@@ -1232,7 +1242,7 @@ ce 05 00 d1  # sub x14, x14, #1
 
     ; Return 0 (child return from fork)
 ff 03 00 f9  # str xzr, [sp, #0]
-f4 fd ff 17  # b trap_exit
+f1 fd ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_execve: execve(pathname, argv, envp)
@@ -1461,7 +1471,7 @@ e0 03 15 aa  # mov x0, x21
 b8 01 00 94  # bl absolute_path
 f5 03 00 aa  # mov x21, x0
 e0 03 15 aa  # mov x0, x21
-20 02 00 94  # bl find_file
+2f 02 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
 8b 09 00 54  # b.lt execve_fail
 fb 03 00 aa  # mov x27, x0 # x27 = file index
@@ -1593,7 +1603,7 @@ e0 03 9f d6  # eret
 #:execve_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-18 fd ff 17  # b trap_exit
+15 fd ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_exit: exit(code)
@@ -1662,7 +1672,7 @@ df 3f 03 d5  # isb
     ; Return 1 (parent return from fork)
 29 00 80 d2  # mov x9, #1
 e9 03 00 f9  # str x9, [sp, #0] # x0 = 1 in trap frame
-f2 fc ff 17  # b trap_exit
+ef fc ff 17  # b trap_exit
 
 #:exit_to_shell
     ; Restore kernel sp from proc[1]+0x10
@@ -1673,7 +1683,7 @@ f2 fc ff 17  # b trap_exit
 3f 01 00 91  # mov sp, x9
 
     ; Jump to shell_return
-99 05 00 14  # b shell_return
+a8 05 00 14  # b shell_return
 
 ;============================================================
 ; syscall_waitid: waitid(idtype, id, infop, options, ...)
@@ -1696,7 +1706,7 @@ aa 00 00 b4  # cbz x10, waitid_no_write
 
 #:waitid_no_write
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-e2 fc ff 17  # b trap_exit
+df fc ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_wait4: wait4(pid, wstatus, options, rusage)
@@ -1722,7 +1732,7 @@ aa 00 00 b4  # cbz x10, wait4_no_write
     ; Return child pid (1)
 29 00 80 d2  # mov x9, #1
 e9 03 00 f9  # str x9, [sp, #0]
-d7 fc ff 17  # b trap_exit
+d4 fc ff 17  # b trap_exit
 
 ;============================================================
 ; uart_putchar: Print character in x0 via PL011 UART
@@ -1968,7 +1978,7 @@ a2 00 00 54  # b.hs rsb_preload_exhausted
     ; Read next sector via disk_read_sector
 20 19 40 f9  # ldr x0, [x9, #0x30] # sector number
 21 00 ac d2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
-09 02 00 94  # bl disk_read_sector
+18 02 00 94  # bl disk_read_sector
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 2a 19 40 f9  # ldr x10, [x9, #0x30]
 4a 05 00 91  # add x10, x10, #1
@@ -2177,14 +2187,14 @@ df 3f 03 d5  # isb
 
     ; Jump to main at VA (PA + 0x40000000 via Entry 1)
 7b 00 80 d2  # mov x27, #3 # board type = SDHCI (raspi3b)
-09 a9 00 10  # adr x9, main
+e9 aa 00 10  # adr x9, main
 0a 00 a8 d2  # movz x10, #0x4000, lsl #16
 29 01 0a 8b  # add x9, x9, x10
 20 01 1f d6  # br x9
 
 #:tramp_virt
 1b 00 80 d2  # mov x27, #0 # board type = not SDHCI (virt)
-43 05 00 14  # b main
+52 05 00 14  # b main
 
 ;============================================================
 ; strcmp: Compare two null-terminated strings
@@ -2272,6 +2282,33 @@ fb ff ff 17  # b abs_copy_cwd
 fb ff ff 17  # b abs_copy_input
 
 #:abs_done
+    ; Collapse consecutive '/' to single '/' (mirrors x86 stage2's behaviour
+    ; in builder-hex0-x86-stage2.hex0 strcpy_path_loop). mes's
+    ; include-from-path macro builds paths via
+    ; (string-append %moduledir "/" file) where %moduledir already ends
+    ; with "/", producing "...module//srfi/srfi-16.scm". Stage2 stores
+    ; created files with single-slash form, so without this normalisation
+    ; find_file's strcmp would never match and access(R_OK) returns ENOENT.
+f3 03 15 aa  # mov x19, x21 # src cursor
+f4 03 15 aa  # mov x20, x21 # dst cursor
+0b 00 80 d2  # mov w11, #0 # last_char = 0
+#:abs_collapse_loop
+69 02 40 39  # ldrb w9, [x19]
+49 01 00 b4  # cbz w9, abs_collapse_done
+3f bd 00 f1  # cmp w9, #0x2F # '/'
+61 00 00 54  # b.ne abs_collapse_write
+7f bd 00 f1  # cmp w11, #0x2F # previous char also '/'?
+80 00 00 54  # b.eq abs_collapse_skip
+#:abs_collapse_write
+89 02 00 39  # strb w9, [x20]
+94 06 00 91  # add x20, x20, #1
+eb 03 09 aa  # mov w11, w9
+#:abs_collapse_skip
+73 06 00 91  # add x19, x19, #1
+f6 ff ff 17  # b abs_collapse_loop
+#:abs_collapse_done
+9f 02 00 39  # strb wzr, [x20] # null-terminate
+
     ; Normalize: resolve /../ sequences in-place
 f3 03 15 aa  # mov x19, x21 # x19 = scan pointer
 #:abs_norm_scan
@@ -2397,7 +2434,7 @@ f3 03 00 aa  # mov x19, x0 # saved path
 89 d6 76 d3  # lsl x9, x20, #10
 a0 02 09 8b  # add x0, x21, x9
 e1 03 13 aa  # mov x1, x19
-73 ff ff 97  # bl strcmp
+64 ff ff 97  # bl strcmp
 a0 00 00 b4  # cbz x0, find_file_found
 
 94 06 00 d1  # sub x20, x20, #1
@@ -2429,7 +2466,7 @@ fe 03 00 f9  # str x30, [sp]
 f3 07 00 f9  # str x19, [sp, #8]
 f3 03 00 aa  # mov x19, x0
 
-6e ff ff 97  # bl get_process_base
+5f ff ff 97  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200 # open_files at +0x200
 69 f2 7d d3  # lsl x9, x19, #3 # fd * 8
 00 00 09 8b  # add x0, x0, x9
@@ -2471,12 +2508,12 @@ ca bf bd f2  # movk x10, #0xedfe, lsl #16
 
     ; Get structure block offset
 60 0a 40 b9  # ldr w0, [x19, #8]
-a9 fe ff 97  # bl bswap32
+9a fe ff 97  # bl bswap32
 74 02 00 8b  # add x20, x19, x0 # x20 = struct block pointer
 
     ; Get strings block offset
 60 0e 40 b9  # ldr w0, [x19, #0xC]
-a6 fe ff 97  # bl bswap32
+97 fe ff 97  # bl bswap32
 75 02 00 8b  # add x21, x19, x0 # x21 = strings block base
 
 16 00 80 d2  # mov x22, #0 # node type
@@ -2486,7 +2523,7 @@ a6 fe ff 97  # bl bswap32
 
 #:fdt_walk
 80 02 40 b9  # ldr w0, [x20]
-9f fe ff 97  # bl bswap32
+90 fe ff 97  # bl bswap32
 fb 03 00 aa  # mov x27, x0 # token
 94 12 00 91  # add x20, x20, #4
 
@@ -2568,11 +2605,11 @@ c6 ff ff 17  # b fdt_walk
 
 #:fdt_prop
 80 02 40 b9  # ldr w0, [x20]
-64 fe ff 97  # bl bswap32
+55 fe ff 97  # bl bswap32
 f8 03 00 aa  # mov x24, x0 # prop_len
 
 80 06 40 b9  # ldr w0, [x20, #4]
-61 fe ff 97  # bl bswap32
+52 fe ff 97  # bl bswap32
 fa 03 00 aa  # mov x26, x0 # nameoff
 
 94 22 00 91  # add x20, x20, #8
@@ -2595,10 +2632,10 @@ e1 01 00 54  # b.ne fdt_prop_skip
 
     ; Extract MMIO base (8-byte)
 80 02 40 b9  # ldr w0, [x20]
-50 fe ff 97  # bl bswap32
+41 fe ff 97  # bl bswap32
 17 7c 60 d3  # lsl x23, x0, #32
 80 06 40 b9  # ldr w0, [x20, #4]
-4d fe ff 97  # bl bswap32
+3e fe ff 97  # bl bswap32
 f7 02 00 aa  # orr x23, x23, x0
 
 df 0a 00 f1  # cmp x22, #2
@@ -2676,7 +2713,7 @@ bf 22 00 b9  # str wzr, [x21, #0x20]
 
 e0 03 16 aa  # mov x0, x22
 01 00 84 d2  # movz x1, #0x2000
-0b fe ff 97  # bl memset_zero
+fc fd ff 97  # bl memset_zero
 
 09 00 82 d2  # movz w9, #0x1000
 a9 2a 00 b9  # str w9, [x21, #0x28]
@@ -2708,11 +2745,11 @@ a9 72 00 b9  # str w9, [x21, #0x70]
 
 a9 72 40 b9  # ldr w9, [x21, #0x70]
 29 01 7d 92  # and w9, w9, #8
-a9 bc ff b4  # cbz w9, reboot
+c9 ba ff b4  # cbz w9, reboot
 
 e0 03 16 aa  # mov x0, x22
 01 00 84 d2  # movz x1, #0x2000
-f4 fd ff 97  # bl memset_zero
+e5 fd ff 97  # bl memset_zero
 
 bf 32 00 b9  # str wzr, [x21, #0x30]
 
@@ -2745,8 +2782,8 @@ a9 72 00 b9  # str w9, [x21, #0x70]
 
 #:virtio_init_fail
 20 04 80 d2  # mov x0, #0x21
-79 fd ff 97  # bl uart_putchar
-ca fd ff 17  # b reboot
+6a fd ff 97  # bl uart_putchar
+bb fd ff 17  # b reboot
 
 #:virtio_init_done
     ; Convert MMIO PA to VA by adding 0xC0000000 (Entry 3 mapping)
@@ -3228,7 +3265,7 @@ ea ff 9f d2  # movz w10, #0xFFFF
 ca 32 00 b9  # str w10, [x22, #0x30]
 
 #:shell_loop
-92 fc ff 97  # bl read_stdin_byte
+83 fc ff 97  # bl read_stdin_byte
 f3 03 00 aa  # mov x19, x0
 
 53 02 00 b4  # cbz x19, shell_done
@@ -3253,42 +3290,42 @@ e0 0c 00 54  # b.eq handle_hex0
 f2 00 00 14  # b handle_other_command
 
 #:shell_skip_comment
-82 fc ff 97  # bl read_stdin_byte
+73 fc ff 97  # bl read_stdin_byte
 1f 28 00 f1  # cmp x0, #0x0A
 c1 ff ff 54  # b.ne shell_skip_comment
 ed ff ff 17  # b shell_loop
 
 #:shell_done
 80 08 80 d2  # mov x0, #0x44
-07 fc ff 97  # bl uart_putchar
+f8 fb ff 97  # bl uart_putchar
 e0 0d 80 d2  # mov x0, #0x6F
-05 fc ff 97  # bl uart_putchar
+f6 fb ff 97  # bl uart_putchar
 c0 0d 80 d2  # mov x0, #0x6E
-03 fc ff 97  # bl uart_putchar
+f4 fb ff 97  # bl uart_putchar
 a0 0c 80 d2  # mov x0, #0x65
-01 fc ff 97  # bl uart_putchar
+f2 fb ff 97  # bl uart_putchar
 c0 05 80 d2  # mov x0, #0x2E
-ff fb ff 97  # bl uart_putchar
+f0 fb ff 97  # bl uart_putchar
 40 01 80 d2  # mov x0, #0x0A
-fd fb ff 97  # bl uart_putchar
+ee fb ff 97  # bl uart_putchar
 
 1a 02 00 94  # bl flush_disk
-4d fc ff 17  # b reboot
+3e fc ff 17  # b reboot
 
 ;============================================================
 ; handle_flush: 'f' command
 ;============================================================
 #:handle_flush
-70 fc ff 97  # bl read_stdin_byte
+61 fc ff 97  # bl read_stdin_byte
 
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 2a 00 80 d2  # mov x10, #1
 2a 25 00 f9  # str x10, [x9, #0x48]
 
 c0 0c 80 d2  # mov x0, #0x66
-f5 fb ff 97  # bl uart_putchar
+e6 fb ff 97  # bl uart_putchar
 40 01 80 d2  # mov x0, #0x0A
-f3 fb ff 97  # bl uart_putchar
+e4 fb ff 97  # bl uart_putchar
 
 d6 ff ff 17  # b shell_loop
 
@@ -3297,21 +3334,21 @@ d6 ff ff 17  # b shell_loop
 ;============================================================
 #:handle_src
 60 0e 80 d2  # mov x0, #0x73
-f0 fb ff 97  # bl uart_putchar
+e1 fb ff 97  # bl uart_putchar
 40 0e 80 d2  # mov x0, #0x72
-ee fb ff 97  # bl uart_putchar
+df fb ff 97  # bl uart_putchar
 60 0c 80 d2  # mov x0, #0x63
-ec fb ff 97  # bl uart_putchar
+dd fb ff 97  # bl uart_putchar
 00 04 80 d2  # mov x0, #0x20
-ea fb ff 97  # bl uart_putchar
+db fb ff 97  # bl uart_putchar
 
-5f fc ff 97  # bl read_stdin_byte
-5e fc ff 97  # bl read_stdin_byte
-5d fc ff 97  # bl read_stdin_byte
+50 fc ff 97  # bl read_stdin_byte
+4f fc ff 97  # bl read_stdin_byte
+4e fc ff 97  # bl read_stdin_byte
 
 14 00 80 d2  # mov x20, #0
 #:src_parse_count
-5b fc ff 97  # bl read_stdin_byte
+4c fc ff 97  # bl read_stdin_byte
 1f 80 00 f1  # cmp x0, #0x20
 c0 00 00 54  # b.eq src_count_done
 49 01 80 d2  # mov x9, #10
@@ -3325,7 +3362,7 @@ f5 03 14 aa  # mov x21, x20
 16 00 ac d2  # movz x22, #0x6000, lsl #16
 f7 03 16 aa  # mov x23, x22
 #:src_read_name
-50 fc ff 97  # bl read_stdin_byte
+41 fc ff 97  # bl read_stdin_byte
 1f 28 00 f1  # cmp x0, #0x0A
 80 00 00 54  # b.eq src_name_done
 e0 02 00 39  # strb w0, [x23]
@@ -3335,12 +3372,12 @@ fb ff ff 17  # b src_read_name
 ff 02 00 39  # strb wzr, [x23]
 
 e0 03 16 aa  # mov x0, x22
-13 fc ff 97  # bl print_string
+04 fc ff 97  # bl print_string
 40 01 80 d2  # mov x0, #0x0A
-d0 fb ff 97  # bl uart_putchar
+c1 fb ff 97  # bl uart_putchar
 
 e0 03 16 aa  # mov x0, x22
-f1 fc ff 97  # bl absolute_path
+e2 fc ff 97  # bl absolute_path
 f6 03 00 aa  # mov x22, x0
 
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
@@ -3375,7 +3412,7 @@ d7 02 40 f9  # ldr x23, [x22]
 
 #:src_read_data
 d4 00 00 b4  # cbz x20, src_data_done
-2a fc ff 97  # bl read_stdin_byte
+1b fc ff 97  # bl read_stdin_byte
 e0 02 00 39  # strb w0, [x23]
 f7 06 00 91  # add x23, x23, #1
 94 06 00 d1  # sub x20, x20, #1
@@ -3396,25 +3433,25 @@ d5 06 00 f9  # str x21, [x22, #8]
 ;============================================================
 #:handle_hex0
 00 0d 80 d2  # mov x0, #0x68
-a8 fb ff 97  # bl uart_putchar
+99 fb ff 97  # bl uart_putchar
 a0 0c 80 d2  # mov x0, #0x65
-a6 fb ff 97  # bl uart_putchar
+97 fb ff 97  # bl uart_putchar
 00 0f 80 d2  # mov x0, #0x78
-a4 fb ff 97  # bl uart_putchar
+95 fb ff 97  # bl uart_putchar
 00 06 80 d2  # mov x0, #0x30
-a2 fb ff 97  # bl uart_putchar
+93 fb ff 97  # bl uart_putchar
 00 04 80 d2  # mov x0, #0x20
-a0 fb ff 97  # bl uart_putchar
+91 fb ff 97  # bl uart_putchar
 
-15 fc ff 97  # bl read_stdin_byte
-14 fc ff 97  # bl read_stdin_byte
-13 fc ff 97  # bl read_stdin_byte
-12 fc ff 97  # bl read_stdin_byte
+06 fc ff 97  # bl read_stdin_byte
+05 fc ff 97  # bl read_stdin_byte
+04 fc ff 97  # bl read_stdin_byte
+03 fc ff 97  # bl read_stdin_byte
 
 14 00 ac d2  # movz x20, #0x6000, lsl #16
 f7 03 14 aa  # mov x23, x20
 #:hex0_read_input
-0f fc ff 97  # bl read_stdin_byte
+00 fc ff 97  # bl read_stdin_byte
 1f 80 00 f1  # cmp x0, #0x20
 80 00 00 54  # b.eq hex0_input_done
 e0 02 00 39  # strb w0, [x23]
@@ -3424,15 +3461,15 @@ fb ff ff 17  # b hex0_read_input
 ff 02 00 39  # strb wzr, [x23]
 
 e0 03 14 aa  # mov x0, x20
-d2 fb ff 97  # bl print_string
+c3 fb ff 97  # bl print_string
 00 04 80 d2  # mov x0, #0x20
-8f fb ff 97  # bl uart_putchar
+80 fb ff 97  # bl uart_putchar
 
 15 00 ac d2  # movz x21, #0x6000, lsl #16
 b5 02 10 91  # add x21, x21, #0x400
 f7 03 15 aa  # mov x23, x21
 #:hex0_read_output
-01 fc ff 97  # bl read_stdin_byte
+f2 fb ff 97  # bl read_stdin_byte
 1f 28 00 f1  # cmp x0, #0x0A
 80 00 00 54  # b.eq hex0_output_done
 e0 02 00 39  # strb w0, [x23]
@@ -3442,12 +3479,12 @@ fb ff ff 17  # b hex0_read_output
 ff 02 00 39  # strb wzr, [x23]
 
 e0 03 15 aa  # mov x0, x21
-c4 fb ff 97  # bl print_string
+b5 fb ff 97  # bl print_string
 40 01 80 d2  # mov x0, #0x0A
-81 fb ff 97  # bl uart_putchar
+72 fb ff 97  # bl uart_putchar
 
 e0 03 14 aa  # mov x0, x20
-a2 fc ff 97  # bl absolute_path
+93 fc ff 97  # bl absolute_path
 f4 03 00 aa  # mov x20, x0
 0b fd ff 97  # bl find_file
 1f 00 00 f1  # cmp x0, #0
@@ -3461,7 +3498,7 @@ ea ee 7c d3  # lsl x10, x23, #4
 37 05 40 f9  # ldr x23, [x9, #8]
 
 e0 03 15 aa  # mov x0, x21
-96 fc ff 97  # bl absolute_path
+87 fc ff 97  # bl absolute_path
 f5 03 00 aa  # mov x21, x0
 
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
@@ -3595,7 +3632,7 @@ cf ff ff 17  # b hex0_compile_loop
 95 06 00 91  # add x21, x20, #1
 
 #:hoc_read_name
-88 fb ff 97  # bl read_stdin_byte
+79 fb ff 97  # bl read_stdin_byte
 1f 80 00 f1  # cmp x0, #0x20
 80 00 00 54  # b.eq hoc_name_done
 a0 02 00 39  # strb w0, [x21]
@@ -3609,7 +3646,7 @@ bf 02 00 39  # strb wzr, [x21]
 b5 02 09 8b  # add x21, x21, x9
 f6 03 15 aa  # mov x22, x21
 #:hoc_read_arg
-7d fb ff 97  # bl read_stdin_byte
+6e fb ff 97  # bl read_stdin_byte
 1f 28 00 f1  # cmp x0, #0x0A
 80 00 00 54  # b.eq hoc_arg_done
 c0 02 00 39  # strb w0, [x22]
@@ -3619,13 +3656,13 @@ fb ff ff 17  # b hoc_read_arg
 df 02 00 39  # strb wzr, [x22]
 
 e0 03 14 aa  # mov x0, x20
-40 fb ff 97  # bl print_string
+31 fb ff 97  # bl print_string
 00 04 80 d2  # mov x0, #0x20
-fd fa ff 97  # bl uart_putchar
+ee fa ff 97  # bl uart_putchar
 e0 03 15 aa  # mov x0, x21
-3c fb ff 97  # bl print_string
+2d fb ff 97  # bl print_string
 40 01 80 d2  # mov x0, #0x0A
-f9 fa ff 97  # bl uart_putchar
+ea fa ff 97  # bl uart_putchar
 
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 34 2d 00 f9  # str x20, [x9, #0x58]
@@ -3634,7 +3671,7 @@ f9 fa ff 97  # bl uart_putchar
 3f 39 00 f9  # str xzr, [x9, #0x70]
 
 e0 03 14 aa  # mov x0, x20
-15 fc ff 97  # bl absolute_path
+06 fc ff 97  # bl absolute_path
 f4 03 00 aa  # mov x20, x0
 
 7e fc ff 97  # bl find_file
@@ -3653,7 +3690,7 @@ ca ee 7c d3  # lsl x10, x22, #4
 4a 05 00 91  # add x10, x10, #1
 2a 11 00 f9  # str x10, [x9, #0x20]
 
-ff fb ff 97  # bl get_process_base
+f0 fb ff 97  # bl get_process_base
 f8 03 00 aa  # mov x24, x0
 
 09 00 82 d2  # movz x9, #0x1000
@@ -3673,7 +3710,7 @@ fa ff ff 17  # b hoc_copy_cwd
 
 00 03 08 91  # add x0, x24, #0x200
 01 c0 81 d2  # movz x1, #0xE00
-37 fb ff 97  # bl memset_zero
+28 fb ff 97  # bl memset_zero
 
 d9 0e 40 f9  # ldr x25, [x22, #0x18]
 c9 12 40 f9  # ldr x9, [x22, #0x20]
@@ -3682,7 +3719,7 @@ d3 72 40 79  # ldrh w19, [x22, #0x38]
 
 00 0c a8 d2  # movz x0, #0x4060, lsl #16
 01 04 a0 d2  # movz x1, #0x20, lsl #16
-30 fb ff 97  # bl memset_zero
+21 fb ff 97  # bl memset_zero
 
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 0a 0e a8 d2  # movz x10, #0x4070, lsl #16
@@ -3700,7 +3737,7 @@ e9 0a 40 f9  # ldr x9, [x23, #0x10]
 0a 00 a8 d2  # movz x10, #0x4000, lsl #16
 20 01 0a 8b  # add x0, x9, x10
 e2 12 40 f9  # ldr x2, [x23, #0x20]
-28 fb ff 97  # bl memcpy
+19 fb ff 97  # bl memcpy
 
 e9 0a 40 f9  # ldr x9, [x23, #0x10]
 ea 12 40 f9  # ldr x10, [x23, #0x20]
@@ -3745,7 +3782,7 @@ ea 03 00 91  # mov x10, sp
 e0 03 16 aa  # mov x0, x22
 e1 03 15 aa  # mov x1, x21
 02 20 80 d2  # mov x2, #256
-07 fb ff 97  # bl memcpy
+f8 fa ff 97  # bl memcpy
 09 00 a8 d2  # movz x9, #0x4000, lsl #16
 c9 02 09 cb  # sub x9, x22, x9
 73 22 00 d1  # sub x19, x19, #8
@@ -3756,7 +3793,7 @@ d7 02 04 91  # add x23, x22, #0x100
 e0 03 17 aa  # mov x0, x23
 e1 03 14 aa  # mov x1, x20
 02 20 80 d2  # mov x2, #256
-fe fa ff 97  # bl memcpy
+ef fa ff 97  # bl memcpy
 09 00 a8 d2  # movz x9, #0x4000, lsl #16
 e9 02 09 cb  # sub x9, x23, x9
 73 22 00 d1  # sub x19, x19, #8
@@ -3783,9 +3820,9 @@ e0 03 9f d6  # eret
 
 #:hoc_not_found
 e0 07 80 d2  # mov x0, #0x3F
-81 fa ff 97  # bl uart_putchar
+72 fa ff 97  # bl uart_putchar
 40 01 80 d2  # mov x0, #0x0A
-7f fa ff 97  # bl uart_putchar
+70 fa ff 97  # bl uart_putchar
 62 fe ff 17  # b shell_loop
 
 #:shell_return
@@ -4075,10 +4112,10 @@ fa 03 02 aa  # mov x26, x2
 
 
     ; Load RAM base into x20
-f5 f9 ff 97  # bl load_ram_base
+e6 f9 ff 97  # bl load_ram_base
 
     ; Set up exception vector table
-29 7f fe 10  # adr x9, exception_vectors
+e9 7c fe 10  # adr x9, exception_vectors
 09 c0 18 d5  # msr vbar_el1, x9
 
     ; Disable all EL1 interrupts
@@ -4098,7 +4135,7 @@ e0 03 19 aa  # mov x0, x25
 a0 03 00 54  # b.eq init_virtio
 3f 08 00 f1  # cmp x1, #2
 e0 03 00 54  # b.eq init_spi_sd
-ea f9 ff 17  # b reboot
+db f9 ff 17  # b reboot
 #:init_sdhci
     ; SDHCI and UART accessed via Entry 1 L2 Device entries (VA = PA + 0x40000000)
     ; x26 = SDHCI PA from stage1 (0x3F300000)
@@ -4183,17 +4220,17 @@ df fc ff 97  # bl spi_sd_init
     ; Zero process descriptors (64KB at 0x60400000)
 00 08 ac d2  # movz x0, #0x6040, lsl #16
 01 02 80 d2  # movz x1, #0x10, lsl #12
-c5 f9 ff 97  # bl memset_zero
+b6 f9 ff 97  # bl memset_zero
 
     ; Zero file names area (16MB at 0x60900000)
 00 12 ac d2  # movz x0, #0x6090, lsl #16
 01 20 a0 d2  # movz x1, #0x100, lsl #16
-c2 f9 ff 97  # bl memset_zero
+b3 f9 ff 97  # bl memset_zero
 
     ; Zero file descriptors area (512KB at 0x60820000)
 40 10 ac d2  # movz x0, #0x6082, lsl #16
 01 01 a0 d2  # movz x1, #0x8, lsl #16
-bf f9 ff 97  # bl memset_zero
+b0 f9 ff 97  # bl memset_zero
 
     ; Set process 0 current_dir = "/"
 09 08 ac d2  # movz x9, #0x6040, lsl #16
@@ -4210,7 +4247,7 @@ ea 05 80 d2  # mov w10, #0x2F
     ; Set up page table (skip on raspi3b — trampoline already did it)
 7f 0f 00 f1  # cmp x27, #3
 00 01 00 54  # b.eq skip_page_table
-f5 f9 ff 97  # bl setup_page_table
+e6 f9 ff 97  # bl setup_page_table
     ; Enable MMU (stays on forever) — preserve RES1 bits
 09 10 38 d5  # mrs x9, sctlr_el1
 29 01 40 b2  # orr x9, x9, #1

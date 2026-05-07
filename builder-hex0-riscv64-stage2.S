@@ -431,6 +431,15 @@ syscall_brk:
     slli t3, t3, 1
     add t0, t0, t3           # PA = new brk
 
+    # Cap at user-space limit (PA 0x8FF00000 = VA 0x0FF00000), leaves 1MB
+    # for user stack growing down from VA 0x10000000. Without this cap,
+    # large brk requests (e.g. mes's default 64-bit M2 arena ~480MB) walk
+    # the zero-loop past 0x90000000 into kernel structures. Linux brk(2)
+    # returns the CURRENT brk on failure (not -1), so do the same here.
+    lui t4, 0x47F80          # 0x47F80 << 12 = 0x47F80000
+    slli t4, t4, 1           # t4 = 0x8FF00000
+    bgeu t0, t4, brk_return_current
+
     # Zero memory from old brk to new brk if extending
     bge t2, t0, brk_store    # skip if shrinking or same
     mv t4, t2                # t4 = cursor = old brk (PA)
@@ -1940,25 +1949,28 @@ setup_page_table:
     # For PA=0x80000000: PPN = 0x80000000 >> 12 = 0x80000
     # PTE = 0x80000 << 10 | flags = 0x20000000 | flags
     #
-    # Entry 0: PA=0x80000000, flags=U|X|W|R|V = 0b00011111 = 0x1F
-    # PTE = 0x20000000 | 0x1F = 0x2000001F
+    # Entry 0: PA=0x80000000, flags=D|A|U|X|W|R|V = 0b11011111 = 0xDF
+    # PTE = 0x20000000 | 0xDF = 0x200000DF
+    # A and D bits set unconditionally: SiFive U54 (sifive_u QEMU) raises
+    # page faults on access when A=0 or D=0; the riscv64 virt CPU
+    # auto-updates them. Setting both works on both boards.
     lui t1, 0x40080
     slli a0, t1, 1              # a0 = 0x80100000 page table base
     lui t0, 0x20000
-    addi t0, t0, 0x1F        # PTE = 0x2000001F
+    addi t0, t0, 0xDF        # PTE = 0x200000DF
     sd t0, 0(a0)             # entry 0
 
-    # Entry 2: PA=0x80000000, flags=X|W|R|V = 0b00001111 = 0x0F (no U bit)
-    # PTE = 0x20000000 | 0x0F = 0x2000000F
+    # Entry 2: PA=0x80000000, flags=D|A|X|W|R|V = 0b11001111 = 0xCF (no U bit)
+    # PTE = 0x20000000 | 0xCF = 0x200000CF
     lui t0, 0x20000
-    addi t0, t0, 0x0F
+    addi t0, t0, 0xCF
     sd t0, 16(a0)            # entry 2 (offset = 2*8 = 16)
 
-    # Entry 3: PA=0xC0000000, flags=X|W|R|V = 0x0F
+    # Entry 3: PA=0xC0000000, flags=D|A|X|W|R|V = 0xCF
     # PPN = 0xC0000000 >> 12 = 0xC0000
-    # PTE = 0xC0000 << 10 | 0x0F = 0x30000000 | 0x0F = 0x3000000F
+    # PTE = 0xC0000 << 10 | 0xCF = 0x30000000 | 0xCF = 0x300000CF
     lui t0, 0x30000
-    addi t0, t0, 0x0F
+    addi t0, t0, 0xCF
     sd t0, 24(a0)            # entry 3 (offset = 3*8 = 24)
 
     # Compute satp value: mode=8 (Sv39) << 60 | PPN(page_table)
@@ -2068,6 +2080,32 @@ abs_copy_input:
     j abs_copy_input
 
 abs_done:
+    # Collapse consecutive '/' to single '/' (mirrors x86 stage2's behaviour
+    # in builder-hex0-x86-stage2.hex0 strcpy_path_loop). mes's
+    # include-from-path macro builds paths via
+    # (string-append %moduledir "/" file) where %moduledir already ends
+    # with "/", producing "...module//srfi/srfi-16.scm". Stage2 stores
+    # created files with single-slash form, so without this normalisation
+    # find_file's strcmp would never match and access(R_OK) returns ENOENT.
+    mv s0, s2                # src cursor
+    mv s1, s2                # dst cursor
+    li t2, 0                 # last_char = 0
+abs_collapse_loop:
+    lbu t0, 0(s0)
+    beqz t0, abs_collapse_done
+    li t1, 0x2F              # '/'
+    bne t0, t1, abs_collapse_write
+    beq t2, t1, abs_collapse_skip  # previous was also '/'
+abs_collapse_write:
+    sb t0, 0(s1)
+    addi s1, s1, 1
+    mv t2, t0
+abs_collapse_skip:
+    addi s0, s0, 1
+    j abs_collapse_loop
+abs_collapse_done:
+    sb zero, 0(s1)           # null-terminate
+
     # Normalize: resolve /../ sequences in-place
     # Walk from start (s2), look for "/../"
     # When found, backtrack to remove preceding component
