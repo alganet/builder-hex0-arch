@@ -438,7 +438,7 @@ syscall_brk:
     # returns the CURRENT brk on failure (not -1), so do the same here.
     lui t4, 0x47F80          # 0x47F80 << 12 = 0x47F80000
     slli t4, t4, 1           # t4 = 0x8FF00000
-    bgeu t0, t4, brk_return_current
+    bgtu t0, t4, brk_return_current
 
     # Zero memory from old brk to new brk if extending
     bge t2, t0, brk_store    # skip if shrinking or same
