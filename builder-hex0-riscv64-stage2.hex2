@@ -75,11 +75,11 @@
 #   +0x200: open_files (448 entries x 8 bytes)
 #            each: global_file_index(4), current_offset(4)
 #
-# Global file descriptor table (16 bytes each, at 0x81000000):
+# Global file descriptor table (16 bytes each, at 0xA0820000):
 #   +0x00: file_address (8)
 #   +0x08: file_length (8)
 #
-# File names table (1024 bytes each, at 0x80800000):
+# File names table (1024 bytes each, at 0xA0020000):
 #   Null-terminated absolute paths
 #
 # VirtIO structures at 0x80500000:
@@ -438,7 +438,7 @@ $trap_exit 6F000000  # j trap_exit
 # returns the CURRENT brk on failure (not -1), so do the same here.
 .800E0000 .0000F847 37000000  # lui t4, 0x47F80
 .800E0000 .00800E00 .00001000 13100000  # slli t4, t4, 1
-.00800200 .0000D001 @brk_return_current 63700000  # bgeu t0, t4, brk_return_current
+.00800E00 .00005000 @brk_return_current 63600000  # bgtu t0, t4, brk_return_current
 
 # Zero memory from old brk to new brk if extending
 .00800300 .00005000 @brk_store 63500000  # bge t2, t0, brk_store
@@ -656,7 +656,7 @@ $openat_find_slash 6F000000  # j openat_find_slash
 .800A0000 .00800200 .00000001 03300000  # ld s5, 0x10(t0)
 
 # Copy filename to file names table
-# dest = 0x80800000 + s5 * 1024
+# dest = 0xA0020000 + s5 * 1024
 .00030000 .00000150 37000000  # lui t1, 0x50010
 .00030000 .00000300 .00001000 13100000  # slli t1, t1, 1
 .80030000 .00800A00 .0000A000 13100000  # slli t2, s5, 10
@@ -672,7 +672,7 @@ $openat_copy_name 6F000000  # j openat_copy_name
 :openat_name_done
 
 # Set up global file descriptor
-# fd_entry = 0x81000000 + s5 * 16
+# fd_entry = 0xA0820000 + s5 * 16
 .80020000 .00004150 37000000  # lui t0, 0x50410
 .80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
 .00030000 .00800A00 .00004000 13100000  # slli t1, s5, 4
@@ -1938,12 +1938,6 @@ $memcpy_loop 6F000000  # j memcpy_loop
 .80050000 .00100000 37000000  # lui a1, 1
 .80000000 $memset_zero 6F000000  # call memset_zero
 
-# Page table entry format (Sv39 gigapage):
-# PPN[53:10] = PA >> 30 << 28 (for gigapages, PPN[1:0] must be 0)
-# Actually: PTE = (PA >> 12) << 10 | flags
-# For gigapage: PA must be 1GB aligned, PPN = PA >> 12
-# So PTE = (PA >> 2) | flags  ... wait let me think again
-#
 # Sv39 PTE format: [63:54]=reserved, [53:10]=PPN, [9:8]=RSW, [7:0]=DAGUXWRV
 # PPN = phys_addr >> 12  (page number)
 # PTE = PPN << 10 | flags
@@ -2227,7 +2221,7 @@ $abs_norm_scan 6F000000  # j abs_norm_scan
 .80040000 .00800200 .00000001 03300000  # ld s1, 0x10(t0)
 .80040000 .00800400 .0000F0FF 13000000  # addi s1, s1, -1
 
-# File names base = 0x80800000
+# File names base = 0xA0020000
 .80020000 .00000150 37000000  # lui t0, 0x50010
 .00090000 .00800200 .00001000 13100000  # slli s2, t0, 1
 
@@ -2235,7 +2229,7 @@ $abs_norm_scan 6F000000  # j abs_norm_scan
 .80020000 .00003000 13000000  # li t0, 3
 .00800400 .00005000 @find_file_not_found 63400000  # blt s1, t0, find_file_not_found
 
-# filename address = 0x80800000 + file_index * 1024
+# filename address = 0xA0020000 + file_index * 1024
 .80020000 .00800400 .0000A000 13100000  # slli t0, s1, 10
 .00050000 .00000900 .00005000 33000000  # add a0, s2, t0
 .80050000 .00000400 13000000  # mv a1, s0
@@ -3313,7 +3307,7 @@ $src_read_name 6F000000  # j src_read_name
 .80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
 .000A0000 .00800200 .00000001 03300000  # ld s4, 0x10(t0)
 
-# Copy filename to file names table (0x80800000 + index * 1024)
+# Copy filename to file names table (0xA0020000 + index * 1024)
 .00030000 .00000150 37000000  # lui t1, 0x50010
 .00030000 .00000300 .00001000 13100000  # slli t1, t1, 1
 .80030000 .00000A00 .0000A000 13100000  # slli t2, s4, 10
@@ -3328,7 +3322,7 @@ $src_read_name 6F000000  # j src_read_name
 $src_copy_fname 6F000000  # j src_copy_fname
 :src_fname_done
 
-# Set up global file descriptor (0x81000000 + index * 16)
+# Set up global file descriptor (0xA0820000 + index * 16)
 .80020000 .00004150 37000000  # lui t0, 0x50410
 .80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
 .00030000 .00000A00 .00004000 13100000  # slli t1, s4, 4
@@ -4063,13 +4057,13 @@ $storage_ready 6F000000  # j storage_ready
 .80050000 .00000100 37000000  # lui a1, 0x10
 .80000000 $memset_zero 6F000000  # call memset_zero
 
-# Zero file names area (8MB at 0x80800000)
+# Zero file names area (8MB at 0xA0020000)
 .00050000 .00000150 37000000  # lui a0, 0x50010
 .00050000 .00000500 .00001000 13100000  # slli a0, a0, 1
 .80050000 .00008000 37000000  # lui a1, 0x800
 .80000000 $memset_zero 6F000000  # call memset_zero
 
-# Zero file descriptors area (512KB at 0x81000000)
+# Zero file descriptors area (512KB at 0xA0820000)
 .00050000 .00004150 37000000  # lui a0, 0x50410
 .00050000 .00000500 .00001000 13100000  # slli a0, a0, 1
 .80050000 .00000800 37000000  # lui a1, 0x80

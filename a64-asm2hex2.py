@@ -300,8 +300,8 @@ def encode_instruction(code, comment, addr, labels):
         hex_str = encode_mnemonic(mnemonic, args, addr, labels)
         return f'{hex_str}  # {full_comment}'
     except Exception as e:
-        print(f"# ERROR: {e} on: {code}", file=sys.stderr)
-        return f'# ERROR: {code}'
+        print(f"a64-asm2hex2: {e} on: {code}", file=sys.stderr)
+        sys.exit(1)
 
 
 def encode_mnemonic(mnemonic, args, addr, labels):

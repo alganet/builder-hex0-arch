@@ -72,7 +72,7 @@ $(HEX2):
 
 riscv64-stage1-virt: builder-hex0-riscv64-stage1-virt.bin builder-hex0-riscv64-stage1-virt.hex0
 
-builder-hex0-riscv64-stage1-virt.hex2: builder-hex0-riscv64-stage1-virt.S rv64-asm2hex2.py asm.py
+builder-hex0-riscv64-stage1-virt.hex2: builder-hex0-riscv64-stage1-virt.S rv64-asm2hex2.py
 	$(PYTHON3) rv64-asm2hex2.py < $< > $@
 
 builder-hex0-riscv64-stage1-virt.bin: builder-hex0-riscv64-stage1-virt.hex2 $(HEX2)
@@ -85,7 +85,7 @@ builder-hex0-riscv64-stage1-virt.hex0: builder-hex0-riscv64-stage1-virt.hex2 bui
 
 riscv64-stage1-sifive_u: builder-hex0-riscv64-stage1-sifive_u.bin builder-hex0-riscv64-stage1-sifive_u.hex0
 
-builder-hex0-riscv64-stage1-sifive_u.hex2: builder-hex0-riscv64-stage1-sifive_u.S rv64-asm2hex2.py asm.py
+builder-hex0-riscv64-stage1-sifive_u.hex2: builder-hex0-riscv64-stage1-sifive_u.S rv64-asm2hex2.py
 	$(PYTHON3) rv64-asm2hex2.py < $< > $@
 
 builder-hex0-riscv64-stage1-sifive_u.bin: builder-hex0-riscv64-stage1-sifive_u.hex2 $(HEX2)
@@ -98,7 +98,7 @@ builder-hex0-riscv64-stage1-sifive_u.hex0: builder-hex0-riscv64-stage1-sifive_u.
 
 riscv64-stage2: builder-hex0-riscv64-stage2.hex0
 
-builder-hex0-riscv64-stage2.hex2: builder-hex0-riscv64-stage2.S rv64-asm2hex2.py asm.py
+builder-hex0-riscv64-stage2.hex2: builder-hex0-riscv64-stage2.S rv64-asm2hex2.py
 	$(PYTHON3) rv64-asm2hex2.py < $< > $@
 
 builder-hex0-riscv64-stage2.bin: builder-hex0-riscv64-stage2.hex2 $(HEX2)
