@@ -75,11 +75,11 @@
 #   +0x200: open_files (448 entries x 8 bytes)
 #            each: global_file_index(4), current_offset(4)
 #
-# Global file descriptor table (16 bytes each, at 0x81000000):
+# Global file descriptor table (16 bytes each, at 0xA0820000):
 #   +0x00: file_address (8)
 #   +0x08: file_length (8)
 #
-# File names table (1024 bytes each, at 0x80800000):
+# File names table (1024 bytes each, at 0xA0020000):
 #   Null-terminated absolute paths
 #
 # VirtIO structures at 0x80500000:
@@ -362,7 +362,7 @@ write_file:
 
     # Get file_address and file_length from global descriptor
     lui t0, 0x50410
-    slli t0, t0, 1           # 0x81000000
+    slli t0, t0, 1           # 0xA0820000
     slli t1, s7, 4           # index * 16
     add s8, t0, t1           # s8 = &global_fd[file_index]
     ld s9, 0(s8)             # file_address
@@ -549,7 +549,7 @@ read_file:
 
     # Get file_address and file_length from global descriptor
     lui t0, 0x50410
-    slli t0, t0, 1           # 0x81000000
+    slli t0, t0, 1           # 0xA0820000
     slli t1, s7, 4
     add t0, t0, t1
     ld s8, 0(t0)             # file_address
@@ -656,9 +656,9 @@ openat_do_create:
     ld s5, 0x10(t0)          # s5 = next_filenum (our new file index)
 
     # Copy filename to file names table
-    # dest = 0x80800000 + s5 * 1024
+    # dest = 0xA0020000 + s5 * 1024
     lui t1, 0x50010
-    slli t1, t1, 1           # 0x80800000
+    slli t1, t1, 1           # 0xA0020000
     slli t2, s5, 10
     add t1, t1, t2           # destination
     mv t2, s3                # source
@@ -672,9 +672,9 @@ openat_copy_name:
 openat_name_done:
 
     # Set up global file descriptor
-    # fd_entry = 0x81000000 + s5 * 16
+    # fd_entry = 0xA0820000 + s5 * 16
     lui t0, 0x50410
-    slli t0, t0, 1           # 0x81000000
+    slli t0, t0, 1           # 0xA0820000
     slli t1, s5, 4
     add t0, t0, t1
 
@@ -770,7 +770,7 @@ lseek_end:
     # SEEK_END (whence == 2)
     lw t0, 0(s6)             # global file index
     lui t1, 0x50410
-    slli t1, t1, 1           # 0x81000000
+    slli t1, t1, 1           # 0xA0820000
     slli t2, t0, 4
     add t1, t1, t2
     ld t0, 8(t1)             # file_length
@@ -974,7 +974,7 @@ mkdirat_do_create:
 
     # Copy name to file names table
     lui t1, 0x50010
-    slli t1, t1, 1           # 0x80800000
+    slli t1, t1, 1           # 0xA0020000
     slli t2, s5, 10
     add t1, t1, t2
     mv t2, s3
@@ -1937,12 +1937,6 @@ setup_page_table:
     lui a1, 1                # 4096
     call memset_zero
 
-    # Page table entry format (Sv39 gigapage):
-    # PPN[53:10] = PA >> 30 << 28 (for gigapages, PPN[1:0] must be 0)
-    # Actually: PTE = (PA >> 12) << 10 | flags
-    # For gigapage: PA must be 1GB aligned, PPN = PA >> 12
-    # So PTE = (PA >> 2) | flags  ... wait let me think again
-    #
     # Sv39 PTE format: [63:54]=reserved, [53:10]=PPN, [9:8]=RSW, [7:0]=DAGUXWRV
     # PPN = phys_addr >> 12  (page number)
     # PTE = PPN << 10 | flags
@@ -2226,7 +2220,7 @@ find_file:
     ld s1, 0x10(t0)          # next_filenum
     addi s1, s1, -1          # start from last file
 
-    # File names base = 0x80800000
+    # File names base = 0xA0020000
     lui t0, 0x50010
     slli s2, t0, 1
 
@@ -2234,7 +2228,7 @@ find_file_loop:
     li t0, 3
     blt s1, t0, find_file_not_found
 
-    # filename address = 0x80800000 + file_index * 1024
+    # filename address = 0xA0020000 + file_index * 1024
     slli t0, s1, 10
     add a0, s2, t0
     mv a1, s0
@@ -3307,7 +3301,7 @@ src_name_done:
     slli t0, t0, 1           # globals
     ld s4, 0x10(t0)          # s4 = next_filenum (our file index)
 
-    # Copy filename to file names table (0x80800000 + index * 1024)
+    # Copy filename to file names table (0xA0020000 + index * 1024)
     lui t1, 0x50010
     slli t1, t1, 1
     slli t2, s4, 10
@@ -3322,7 +3316,7 @@ src_copy_fname:
     j src_copy_fname
 src_fname_done:
 
-    # Set up global file descriptor (0x81000000 + index * 16)
+    # Set up global file descriptor (0xA0820000 + index * 16)
     lui t0, 0x50410
     slli t0, t0, 1
     slli t1, s4, 4
@@ -4056,13 +4050,13 @@ storage_ready:
     lui a1, 0x10
     call memset_zero
 
-    # Zero file names area (8MB at 0x80800000)
+    # Zero file names area (8MB at 0xA0020000)
     lui a0, 0x50010
     slli a0, a0, 1
     lui a1, 0x800
     call memset_zero
 
-    # Zero file descriptors area (512KB at 0x81000000)
+    # Zero file descriptors area (512KB at 0xA0820000)
     lui a0, 0x50410
     slli a0, a0, 1
     lui a1, 0x80

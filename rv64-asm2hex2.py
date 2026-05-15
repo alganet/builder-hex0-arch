@@ -274,6 +274,15 @@ def emit(mnemonic, args, comment=''):
         label = args[1][1]
         return f'{rs1_f(r_s1)} @{label} {OPCODES["blt"]}{pad}'
 
+    # bgt/ble/bgtu/bleu are pseudo-instructions: swap the operands of
+    # blt/bge/bltu/bgeu respectively.
+    if mnemonic in ('bgt', 'ble', 'bgtu', 'bleu'):
+        _, r_s1 = args[0]
+        _, r_s2 = args[1]
+        label = args[2][1]
+        base = {'bgt': 'blt', 'ble': 'bge', 'bgtu': 'bltu', 'bleu': 'bgeu'}[mnemonic]
+        return f'{rs1_f(r_s2)} {rs2_f(r_s1)} @{label} {OPCODES[base]}{pad}'
+
     if mnemonic == 'neg':
         _, r_d = args[0]
         _, r_s2 = args[1]
@@ -363,8 +372,8 @@ def process_line(raw_line):
         result = emit(mnemonic, args, full_comment)
         return result
     except Exception as e:
-        print(f"# ERROR: {e} on line: {raw_line.rstrip()}", file=sys.stderr)
-        return f'# ERROR: {raw_line.rstrip()}'
+        print(f"rv64-asm2hex2: {e} on line: {raw_line.rstrip()}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main():

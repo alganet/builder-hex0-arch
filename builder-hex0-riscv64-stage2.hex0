@@ -75,11 +75,11 @@
 #   +0x200: open_files (448 entries x 8 bytes)
 #            each: global_file_index(4), current_offset(4)
 #
-# Global file descriptor table (16 bytes each, at 0x81000000):
+# Global file descriptor table (16 bytes each, at 0xA0820000):
 #   +0x00: file_address (8)
 #   +0x08: file_length (8)
 #
-# File names table (1024 bytes each, at 0x80800000):
+# File names table (1024 bytes each, at 0xA0020000):
 #   Null-terminated absolute paths
 #
 # VirtIO structures at 0x80500000:
@@ -438,7 +438,7 @@ b3 82 c2 01  # add t0, t0, t3
 # returns the CURRENT brk on failure (not -1), so do the same here.
 b7 0e f8 47  # lui t4, 0x47F80
 93 9e 1e 00  # slli t4, t4, 1
-63 f6 d2 03  # bgeu t0, t4, brk_return_current
+63 e6 5e 02  # bgtu t0, t4, brk_return_current
 
 # Zero memory from old brk to new brk if extending
 63 dc 53 00  # bge t2, t0, brk_store
@@ -656,7 +656,7 @@ b7 02 18 40  # lui t0, 0x40180
 83 ba 02 01  # ld s5, 0x10(t0)
 
 # Copy filename to file names table
-# dest = 0x80800000 + s5 * 1024
+# dest = 0xA0020000 + s5 * 1024
 37 03 01 50  # lui t1, 0x50010
 13 13 13 00  # slli t1, t1, 1
 93 93 aa 00  # slli t2, s5, 10
@@ -672,7 +672,7 @@ b7 02 18 40  # lui t0, 0x40180
 #:openat_name_done
 
 # Set up global file descriptor
-# fd_entry = 0x81000000 + s5 * 16
+# fd_entry = 0xA0820000 + s5 * 16
 b7 02 41 50  # lui t0, 0x50410
 93 92 12 00  # slli t0, t0, 1
 13 93 4a 00  # slli t1, s5, 4
@@ -1938,12 +1938,6 @@ b7 02 08 40  # lui t0, 0x40080
 b7 15 00 00  # lui a1, 1
 ef f0 5f ef  # call memset_zero
 
-# Page table entry format (Sv39 gigapage):
-# PPN[53:10] = PA >> 30 << 28 (for gigapages, PPN[1:0] must be 0)
-# Actually: PTE = (PA >> 12) << 10 | flags
-# For gigapage: PA must be 1GB aligned, PPN = PA >> 12
-# So PTE = (PA >> 2) | flags  ... wait let me think again
-#
 # Sv39 PTE format: [63:54]=reserved, [53:10]=PPN, [9:8]=RSW, [7:0]=DAGUXWRV
 # PPN = phys_addr >> 12  (page number)
 # PTE = PPN << 10 | flags
@@ -2227,7 +2221,7 @@ b7 02 18 40  # lui t0, 0x40180
 83 b4 02 01  # ld s1, 0x10(t0)
 93 84 f4 ff  # addi s1, s1, -1
 
-# File names base = 0x80800000
+# File names base = 0xA0020000
 b7 02 01 50  # lui t0, 0x50010
 13 99 12 00  # slli s2, t0, 1
 
@@ -2235,7 +2229,7 @@ b7 02 01 50  # lui t0, 0x50010
 93 02 30 00  # li t0, 3
 63 c0 54 02  # blt s1, t0, find_file_not_found
 
-# filename address = 0x80800000 + file_index * 1024
+# filename address = 0xA0020000 + file_index * 1024
 93 92 a4 00  # slli t0, s1, 10
 33 05 59 00  # add a0, s2, t0
 93 05 04 00  # mv a1, s0
@@ -3313,7 +3307,7 @@ b7 02 18 40  # lui t0, 0x40180
 93 92 12 00  # slli t0, t0, 1
 03 ba 02 01  # ld s4, 0x10(t0)
 
-# Copy filename to file names table (0x80800000 + index * 1024)
+# Copy filename to file names table (0xA0020000 + index * 1024)
 37 03 01 50  # lui t1, 0x50010
 13 13 13 00  # slli t1, t1, 1
 93 13 aa 00  # slli t2, s4, 10
@@ -3328,7 +3322,7 @@ b7 02 18 40  # lui t0, 0x40180
 6f f0 df fe  # j src_copy_fname
 #:src_fname_done
 
-# Set up global file descriptor (0x81000000 + index * 16)
+# Set up global file descriptor (0xA0820000 + index * 16)
 b7 02 41 50  # lui t0, 0x50410
 93 92 12 00  # slli t0, t0, 1
 13 13 4a 00  # slli t1, s4, 4
@@ -4063,13 +4057,13 @@ b7 02 18 40  # lui t0, 0x40180
 b7 05 01 00  # lui a1, 0x10
 ef e0 5f b6  # call memset_zero
 
-# Zero file names area (8MB at 0x80800000)
+# Zero file names area (8MB at 0xA0020000)
 37 05 01 50  # lui a0, 0x50010
 13 15 15 00  # slli a0, a0, 1
 b7 05 80 00  # lui a1, 0x800
 ef e0 5f b5  # call memset_zero
 
-# Zero file descriptors area (512KB at 0x81000000)
+# Zero file descriptors area (512KB at 0xA0820000)
 37 05 41 50  # lui a0, 0x50410
 13 15 15 00  # slli a0, a0, 1
 b7 05 08 00  # lui a1, 0x80

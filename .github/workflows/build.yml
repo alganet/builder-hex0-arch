@@ -71,6 +71,9 @@ jobs:
       - name: Build
         run: make ${{ matrix.arch }}
 
+      - name: Verify committed .hex0/.hex2 match regenerated artifacts
+        run: git diff --exit-code -- '*.hex0' '*.hex2'
+
       - name: Test
         run: >
           QEMU_X86=qemu-local/bin/qemu-system-x86_64
