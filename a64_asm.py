@@ -630,7 +630,6 @@ def load_addr(reg, addr):
             continue  # skip leading zeros; MOVZ will zero the rest
         if first:
             result.append(emit('movz', reg, hw, shift))
-            first = True  # already set, but mark that we emitted movz
             first = False
         else:
             if hw != 0:
@@ -641,42 +640,3 @@ def load_addr(reg, addr):
         result.append(emit('movz', reg, 0, 0))
 
     return result
-
-# ---------------------------------------------------------------------------
-# CLI interface
-# ---------------------------------------------------------------------------
-
-def _parse_arg(a):
-    """Parse a single CLI argument as register name, sysreg, or integer."""
-    al = a.lower()
-    if al in REGS:
-        return al
-    if al in SYSREGS:
-        return al
-    if al in CONDS:
-        return al
-    return int(a, 0)
-
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'load_addr':
-        reg = sys.argv[2]
-        addr = int(sys.argv[3], 0)
-        for line in load_addr(reg, addr):
-            print(line)
-    elif len(sys.argv) > 1:
-        mnemonic = sys.argv[1]
-        args = [_parse_arg(a) for a in sys.argv[2:]]
-        print(emit(mnemonic, *args))
-    else:
-        # Batch mode from stdin
-        for line in sys.stdin:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            parts = line.split()
-            mnemonic = parts[0]
-            args = [_parse_arg(a) for a in parts[1:]]
-            result = emit(mnemonic, *args)
-            comment = f"# {line}"
-            print(f"{result}  {comment}")

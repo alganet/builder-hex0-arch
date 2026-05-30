@@ -13,7 +13,7 @@ Usage: python3 a64-asm2hex2.py < input.S > output.hex2
 import sys
 import re
 
-from a64_asm import emit as a64_emit, to_le_hex, REGS
+from a64_asm import emit as a64_emit, to_le_hex, REGS, load_addr
 
 # ---------------------------------------------------------------------------
 # Register helpers
@@ -447,7 +447,6 @@ def encode_mnemonic(mnemonic, args, addr, labels):
             if 0 <= imm <= 0xFFFF:
                 return a64_emit('movz', rd, imm, 0)
             else:
-                from a64_asm import load_addr
                 lines = load_addr(rd, imm)
                 return '\n'.join(f'{line}  # mov {rd}, {src}'
                                 for line in lines)

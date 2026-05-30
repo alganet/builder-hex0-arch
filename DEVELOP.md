@@ -44,8 +44,7 @@ hex2_word.c, so AArch64 pre-resolves all offsets in Python).
 | builder-hex0-riscv64-stage1-virt.S     | RISC-V QEMU virt stage 1 (VirtIO)               |
 | builder-hex0-riscv64-stage1-sifive_u.S | RISC-V SiFive sifive_u stage 1 (SPI+SD)         |
 | builder-hex0-riscv64-stage2.S          | RISC-V portable stage 2 kernel                  |
-| rv64-asm2hex2.py                       | RISC-V assembly-to-hex2 converter               |
-| asm.py                                 | RISC-V instruction encoder library              |
+| rv64-asm2hex2.py                       | RISC-V assembly-to-hex2 converter (encoder inlined) |
 | builder-hex0-aarch64-stage1-virt.S     | AArch64 QEMU virt stage 1 (VirtIO)              |
 | builder-hex0-aarch64-stage1-raspi3b.S  | AArch64 RPi 3B stage 1 (SDHCI, core parking)    |
 | builder-hex0-aarch64-stage2.S          | AArch64 portable stage 2 kernel                 |
@@ -218,7 +217,7 @@ Both stage 1 and stage 2 are tested:
 2. Create `{arch}-asm2hex2.py` assembly-to-hex2 converter
 3. Create stage 1 and stage 2 assembly sources
 4. Add architecture block to `Makefile`
-5. Update `run.sh`, `scripts/k0.kaem`, `scripts/env.{arch}.kaem` in parent abuild
+5. See the parent `abuild` repo for host-side wiring (kaem scripts, env preamble) required to integrate a new architecture into the bootstrap pipeline
 
 
 ## Build and Test
