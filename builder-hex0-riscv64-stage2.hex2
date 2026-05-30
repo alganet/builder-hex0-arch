@@ -3867,24 +3867,8 @@ $hoc_load_phdr 6F000000  # j hoc_load_phdr
 .00010000 .00000400 13000000  # mv sp, s0
 73002010  # sret
 
-# --- We never reach here directly ---
-# When the user program calls exit, syscall_exit runs.
-# exit_to_shell restores sp from proc descriptor and does ret.
-# That ret returns here (to the instruction after the call that
-# led us here... but we used 'j', not 'call').
-# Actually, exit_to_shell loads sp from proc+0x10 and does ret.
-# Since we saved sp BEFORE sret, ret will pop ra from that sp.
-# But ra on the kernel stack at that point is... from the call
-# chain that led to handle_other_command.
-# handle_other_command was jumped to from shell_loop (j instruction).
-# So ra is still whatever internalshell set. This won't work.
-# We need to save a return address.
-
-# Let me fix this: instead of saving sp, save sp and put a
-# known return address. After exit_to_shell does ret,
-# we need to end up back at shell_loop.
-
-# The fix: exit_to_shell will jump to shell_return instead of ret.
+# Control returns to shell_return (set up before sret) when the user
+# program calls exit -> syscall_exit -> exit_to_shell.
 
 :hoc_not_found
 # Print "?\n"

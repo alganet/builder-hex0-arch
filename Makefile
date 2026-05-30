@@ -47,7 +47,8 @@ self-test-aarch64: self-test-aarch64-virt self-test-aarch64-raspi3b
 clean:
 	rm -f builder-hex0-riscv64-*.hex2 builder-hex0-riscv64-*.bin builder-hex0-riscv64-*.hex0
 	rm -f builder-hex0-aarch64-*.hex2 builder-hex0-aarch64-*.bin builder-hex0-aarch64-*.hex0
-	rm -f test-*.img test-self-*.bin BUILD -rf
+	rm -f test-*.img test-self-*.bin
+	rm -rf BUILD
 	$(MAKE) -C hex2 clean
 
 .PHONY: all x86 riscv64 aarch64 test test-x86 test-riscv64 test-aarch64 clean

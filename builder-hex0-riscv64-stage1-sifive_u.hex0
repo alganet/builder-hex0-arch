@@ -19,9 +19,10 @@
 #   s3 = SPI controller MMIO base (0x10050000)
 #   s5 = output write pointer
 #   s6 = high nibble accumulator
-#   s7 = sector buffer (same as s4 for compat)
+#   s7 = sector buffer
 #   s8 = DTB pointer (from OpenSBI a1)
 #   s9 = saved ra in next_byte
+#   s10 = saved R1 result from ACMD41 (SD card init)
 
 #:_start
 # Park non-boot harts (sifive_u boot hart = 1)

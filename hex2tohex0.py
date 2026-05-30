@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Alexandre Gomes Gaigalas <alganet@gmail.com>
 # SPDX-License-Identifier: Apache-2.0
-"""Convert RISC-V hex2 to commented hex0 using the linker binary for correct bytes.
+"""Convert hex2 to commented hex0 using the linker binary for correct bytes.
 
-The hex2 format for RISC-V uses OR'd fragments (.XXXXXXXX) and label references
-($label, @label) that the hex2 linker resolves with architecture-specific instruction
-encoding. This script reads the linker's binary output to get correct byte values,
-and annotates them with comments from the hex2 source.
+Shared between RISC-V and AArch64 stage1/stage2 builds. Both ISAs use OR'd
+hex2 fragments (.XXXXXXXX) and label references ($label, @label) that the
+hex2 linker resolves with arch-specific 4-byte instruction encodings; this
+script reads the linker's binary output to get correct byte values, and
+annotates them with comments from the hex2 source.
 
 Usage: python3 hex2tohex0.py input.hex2 input.bin output.hex0
 """
@@ -14,11 +15,11 @@ import sys
 
 
 def count_bytes(line):
-    """Count bytes produced by a hex2 line for RISC-V 64-bit.
+    """Count bytes produced by a hex2 line for a 4-byte-instruction RISC ISA.
 
-    In RISC-V hex2, all .XXXXXXXX fragments and label references on a single
-    line are OR'd into a single 4-byte instruction word by the linker.
-    Raw hex pairs (without . prefix) are counted individually.
+    All .XXXXXXXX fragments and label references on a single line are OR'd
+    into a single 4-byte instruction word by the linker. Raw hex pairs
+    (without . prefix) are counted individually.
     """
     code = line.split('#')[0].split(';')[0].strip()
     if not code or code.startswith(':'):
