@@ -2023,7 +2023,7 @@ get_process_base:
 #============================================================
 # absolute_path: Resolve path to absolute
 # a0 = input path (null-terminated)
-# Returns: a0 = pointer to resolved path in scratch buffer (0x80600000)
+# Returns: a0 = pointer to resolved path in scratch buffer (0xA0000000)
 # Uses current process's current_dir if path is relative
 #============================================================
 absolute_path:
@@ -2034,7 +2034,7 @@ absolute_path:
     sd s2, 24(sp)
 
     mv s0, a0                # input path
-    # Output buffer = scratch at 0x80600000
+    # Output buffer = scratch at 0xA0000000
     lui t0, 0x50000
     slli s1, t0, 1           # s1 = output pointer (0xA0000000)
     mv s2, s1                # s2 = output start (for return)
