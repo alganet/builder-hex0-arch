@@ -28,7 +28,15 @@
 ;   0x60820000  File descriptors (512KB, 32768 x 16 bytes)
 ;   0x7B800000  Kernel stack top (grows down)
 ;   0x42000000  Preload buffer (8MB, raspi3b only, PA 0x02000000 slow zone)
-;   0x78000000  Saved process memory (bump allocator)
+;   Saved process memory (bump allocator) -- BOARD-SPECIFIC base, because the
+;   upper VA window maps to different PA on each board (see paging notes below):
+;     virt    VA 0x80000000 (Entry 2 -> PA 0x80000000): ~540MB up to file data
+;             at 0xA1900000, clear of the kernel stack at 0x7B800000. A single
+;             fork saves a whole process image (tens of MB), so it must NOT
+;             sit in Entry 1 below the kernel stack (that capped it at 56MB).
+;     raspi3b VA 0x78000000 (Entry 1 -> PA 0x38000000): valid in the 1GB RAM.
+;             0x80000000 is UNSAFE here -- raspi3b's Entry 2 aliases PA
+;             0x00000000, so it would overwrite the kernel in low RAM.
 ;   0xA1900000  File data (bump allocator, grows up to 0xBFFFFFFF)
 ;
 ; AArch64 paging (1GB block descriptors, level 1 table):
@@ -4198,7 +4206,22 @@ storage_ready:
     mov x10, #1
     str x10, [x9, #0x20]
 
-    movz x10, #0x7800, lsl #16   ; save area at VA 0x78000000 (PA 0x38000000)
+    ; Saved-process-memory bump allocator base. Board-specific: the two boards
+    ; map the upper VA window to different physical RAM.
+    ;   virt    Entry 2: VA 0x80000000 -> PA 0x80000000 (upper RAM); ~540MB up
+    ;           to file data (0xA1900000), clear of the kernel stack -- a single
+    ;           fork saves a whole process image (tens of MB).
+    ;   raspi3b Entry 2: VA 0x80000000 -> PA 0x00000000 (aliases low RAM, would
+    ;           clobber the kernel). Keep the legacy VA 0x78000000 (Entry 1 ->
+    ;           PA 0x38000000), valid in the 1GB RAM.
+    ; x27 = board id from _trampoline (3 = raspi3b, 0 = virt).
+    cmp x27, #3
+    b.eq save_area_raspi3b
+    movz x10, #0x8000, lsl #16   ; virt: VA 0x80000000
+    b save_area_set
+save_area_raspi3b:
+    movz x10, #0x7800, lsl #16   ; raspi3b: VA 0x78000000 (-> PA 0x38000000)
+save_area_set:
     str x10, [x9, #0x28]
 
     ; board_has_sdhci is set by init_sdhci or cleared by init_virtio — not touched here
