@@ -529,11 +529,18 @@ syscall_brk:
     ; growing down from PA 0x50000000). Without this cap, large brk
     ; requests (e.g. mes's default 64-bit M2 arena ~480MB) walked the
     ; zero-loop past 0x50000000 into save area, page table, and kernel
-    ; structures, causing untraceable corruption traps. Linux brk(2)
-    ; returns the CURRENT brk on failure (not -1), so do the same here.
+    ; structures, causing untraceable corruption traps.
+    ;
+    ; Return -1 on an over-cap request (NOT the current brk): M2libc's
+    ; _malloc_brk only detects failure via `if(-1 == brk(...)) return 0;`
+    ; -- it has no "brk didn't grow" check -- so returning the current brk
+    ; (the bare Linux syscall convention) reads as success, malloc advances
+    ; its pointer past the cap and hands back a block that was never mapped,
+    ; and the caller faults on first write. -1 makes the OOM detectable, so
+    ; malloc returns NULL and the caller fails cleanly instead of corrupting.
     movz x13, #0x4FF0, lsl #16   ; PA cap = 0x4FF00000
     cmp x9, x13
-    b.hi brk_return_current
+    b.hi brk_return_fail
 
     ; Zero memory from old brk to new brk if extending
     cmp x11, x9
@@ -558,6 +565,12 @@ brk_return_current:
     movz x12, #0x4000, lsl #16
     sub x11, x11, x12
     str x11, [sp, #0]
+    b trap_exit
+
+brk_return_fail:
+    ; Over-cap request: return -1 so M2libc's _malloc_brk detects the failure.
+    movn x9, #0                  ; x9 = -1
+    str x9, [sp, #0]
     b trap_exit
 
 ;============================================================
@@ -1582,6 +1595,23 @@ execve_next_phdr:
     b execve_load_phdr
 
 execve_load_done:
+    ; Guarantee brk sits above the loaded image so malloc's heap never overlaps
+    ; (and the brk zero-loop never wipes) the program's own code. The phdr-
+    ; derived brk above can land at the process base for some images, leaving
+    ; the heap starting inside .text; growing it then zeroes live code, and the
+    ; program faults executing the now-zeroed instructions. The file loads
+    ; contiguously from 0x40600000, so process_base + file_length (+ padding) is
+    ; a reliable floor. x19 = file_length (from find_file, live here).
+    movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0x40]         ; current brk (PA)
+    movz x11, #0x4060, lsl #16   ; process base (PA)
+    add x11, x11, x19            ; + file_length
+    movz x12, #0x2000
+    add x11, x11, x12            ; + padding
+    cmp x10, x11
+    b.hs execve_brk_floor_ok
+    str x11, [x9, #0x40]         ; raise brk to the image floor
+execve_brk_floor_ok:
     ; Set process_address in descriptor
     movz x9, #0x4060, lsl #16    ; PA 0x40600000
     str x9, [x24, #0]

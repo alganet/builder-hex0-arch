@@ -434,11 +434,18 @@ $trap_exit 6F000000  # j trap_exit
 # Cap at user-space limit (PA 0x8FF00000 = VA 0x0FF00000), leaves 1MB
 # for user stack growing down from VA 0x10000000. Without this cap,
 # large brk requests (e.g. mes's default 64-bit M2 arena ~480MB) walk
-# the zero-loop past 0x90000000 into kernel structures. Linux brk(2)
-# returns the CURRENT brk on failure (not -1), so do the same here.
+# the zero-loop past 0x90000000 into kernel structures.
+#
+# Return -1 on an over-cap request (NOT the current brk): M2libc's
+# _malloc_brk only detects failure via `if(-1 == brk(...)) return 0;`
+# -- no "brk didn't grow" check -- so returning the current brk (the bare
+# Linux syscall convention) reads as success, malloc advances past the cap
+# and returns a block that was never mapped, and the caller faults on first
+# write. -1 makes the OOM detectable, so malloc returns NULL and the caller
+# fails cleanly instead of corrupting.
 .800E0000 .0000F847 37000000  # lui t4, 0x47F80
 .800E0000 .00800E00 .00001000 13100000  # slli t4, t4, 1
-.00800E00 .00005000 @brk_return_current 63600000  # bgtu t0, t4, brk_return_current
+.00800E00 .00005000 @brk_return_fail 63600000  # bgtu t0, t4, brk_return_fail
 
 # Zero memory from old brk to new brk if extending
 .00800300 .00005000 @brk_store 63500000  # bge t2, t0, brk_store
@@ -462,6 +469,12 @@ $trap_exit 6F000000  # j trap_exit
 .000E0000 .00000E00 .00001000 13100000  # slli t3, t3, 1
 .80030000 .00800300 .0000C001 33000040  # sub t2, t2, t3
 .00000100 .00007000 .00040004 23300000  # sd t2, 72(sp)
+$trap_exit 6F000000  # j trap_exit
+
+:brk_return_fail
+# Over-cap request: return -1 so M2libc's _malloc_brk detects the failure.
+.80020000 .0000F0FF 13000000  # li t0, -1
+.00000100 .00005000 .00040004 23300000  # sd t0, 72(sp)
 $trap_exit 6F000000  # j trap_exit
 
 #============================================================
