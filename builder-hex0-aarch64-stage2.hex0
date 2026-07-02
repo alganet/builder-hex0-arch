@@ -130,7 +130,7 @@
 ;   offset 264: padding (alignment)
 
 #:_start
-7c 08 00 14  # b _trampoline
+89 08 00 14  # b _trampoline
 
 ;============================================================
 ; Exception vector table (must be 2KB aligned)
@@ -140,55 +140,55 @@
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 2048 (2044 bytes padding)
 #:exception_vectors
     ; Current EL with SP_EL0 - Synchronous
-0e 06 00 14  # b reboot
+1b 06 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - IRQ
-ee 05 00 14  # b reboot
+fb 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - FIQ
-ce 05 00 14  # b reboot
+db 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_EL0 - SError
-ae 05 00 14  # b reboot
+bb 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Current EL with SP_ELx - Synchronous
-8e 05 00 14  # b reboot
+9b 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - IRQ
-6e 05 00 14  # b reboot
+7b 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - FIQ
-4e 05 00 14  # b reboot
+5b 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Current EL with SP_ELx - SError
-2e 05 00 14  # b reboot
+3b 05 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch64 - Synchronous (SVC handler) - offset 0x400
 00 01 00 14  # b trap_handler
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - IRQ
-ee 04 00 14  # b reboot
+fb 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - FIQ
-ce 04 00 14  # b reboot
+db 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch64 - SError
-ae 04 00 14  # b reboot
+bb 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
     ; Lower EL AArch32 - Synchronous
-8e 04 00 14  # b reboot
+9b 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - IRQ
-6e 04 00 14  # b reboot
+7b 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - FIQ
-4e 04 00 14  # b reboot
+5b 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
     ; Lower EL AArch32 - SError
-2e 04 00 14  # b reboot
+3b 04 00 14  # b reboot
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # .align 128 (124 bytes padding)
 
 ;============================================================
@@ -254,35 +254,35 @@ e9 83 00 f9  # str x9, [sp, #256]
 16 60 38 d5  # mrs x22, far_el1
 17 41 38 d5  # mrs x23, sp_el0
 20 04 80 d2  # mov x0, #0x21 # '!'
-8f 03 00 94  # bl uart_putchar
+9c 03 00 94  # bl uart_putchar
 80 fe 5a d3  # lsr x0, x20, #26 # exception class
-a0 03 00 94  # bl print_hex_byte
+ad 03 00 94  # bl print_hex_byte
 40 07 80 d2  # mov x0, #0x3A
-8b 03 00 94  # bl uart_putchar
+98 03 00 94  # bl uart_putchar
 e0 03 15 aa  # mov x0, x21 # ELR
-aa 03 00 94  # bl print_hex32
+b7 03 00 94  # bl print_hex32
 00 08 80 d2  # mov x0, #0x40 # '@'
-87 03 00 94  # bl uart_putchar
+94 03 00 94  # bl uart_putchar
 e0 03 16 aa  # mov x0, x22 # FAR
-a6 03 00 94  # bl print_hex32
+b3 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-83 03 00 94  # bl uart_putchar
+90 03 00 94  # bl uart_putchar
 e0 03 17 aa  # mov x0, x23 # SP_EL0
-a2 03 00 94  # bl print_hex32
+af 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-7f 03 00 94  # bl uart_putchar
+8c 03 00 94  # bl uart_putchar
 e0 7b 40 f9  # ldr x0, [sp, #240] # x30 from trap frame
-9e 03 00 94  # bl print_hex32
+ab 03 00 94  # bl print_hex32
 80 05 80 d2  # mov x0, #0x2C # ','
-7b 03 00 94  # bl uart_putchar
+88 03 00 94  # bl uart_putchar
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 20 0d 40 f9  # ldr x0, [x9, #0x18] # next_file_address
-99 03 00 94  # bl print_hex32
+a6 03 00 94  # bl print_hex32
 40 01 80 d2  # mov x0, #0x0A
-76 03 00 94  # bl uart_putchar
+83 03 00 94  # bl uart_putchar
 69 11 80 d2  # mov x9, #139
 e9 03 00 f9  # str x9, [sp, #0]
-32 03 00 14  # b syscall_exit
+3f 03 00 14  # b syscall_exit
 
 ; Dispatch syscall based on x8
 #:dispatch
@@ -333,7 +333,7 @@ e9 03 00 f9  # str x9, [sp, #0]
 #:tramp_write
 37 00 00 14  # b syscall_write
 #:tramp_exit
-07 03 00 14  # b syscall_exit
+14 03 00 14  # b syscall_exit
 #:tramp_brk
 66 00 00 14  # b syscall_brk
 #:tramp_read
@@ -357,9 +357,9 @@ be 01 00 14  # b syscall_clone
 #:tramp_execve
 17 02 00 14  # b syscall_execve
 #:tramp_waitid
-27 03 00 14  # b syscall_waitid
+34 03 00 14  # b syscall_waitid
 #:tramp_wait4
-30 03 00 14  # b syscall_wait4
+3d 03 00 14  # b syscall_wait4
 #:tramp_stub
 b8 01 00 14  # b syscall_stub_zero
 
@@ -443,7 +443,7 @@ bf 0e 00 f1  # cmp x21, #3
 #:write_loop
 d7 00 00 b4  # cbz x23, write_done
 c0 02 40 39  # ldrb w0, [x22]
-07 03 00 94  # bl uart_putchar
+14 03 00 94  # bl uart_putchar
 d6 06 00 91  # add x22, x22, #1
 f7 06 00 d1  # sub x23, x23, #1
 fb ff ff 17  # b write_loop
@@ -456,7 +456,7 @@ c9 ff ff 17  # b trap_exit
     ; x21=fd, x22=buf, x23=count, x24=original count
     ; Get file info from process fd table
 e0 03 15 aa  # mov x0, x21
-b9 04 00 94  # bl fd_to_file_index
+c6 04 00 94  # bl fd_to_file_index
 f9 03 00 aa  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -467,7 +467,7 @@ f9 03 00 aa  # mov x25, x0 # x25 = global file index
 5c 07 40 f9  # ldr x28, [x26, #8] # file_length
 
     ; Get current_offset from process fd
-15 04 00 94  # bl get_process_base
+22 04 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200
 a9 f2 7d d3  # lsl x9, x21, #3
 13 00 09 8b  # add x19, x0, x9 # x19 = &open_files[fd]
@@ -608,7 +608,7 @@ d5 03 00 b5  # cbnz x21, read_file # if fd != 0, read from file
     ; Read next sector
 e0 03 0a aa  # mov x0, x10 # sector number
 21 00 ac d2  # movz x1, #0x6001, lsl #16 # buffer = 0x60010000
-5c 05 00 94  # bl disk_read_sector
+69 05 00 94  # bl disk_read_sector
     ; Advance sector, reset offset
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 2a 19 40 f9  # ldr x10, [x9, #0x30]
@@ -644,7 +644,7 @@ f8 03 00 f9  # str x24, [sp, #0] # return original count
     ; x21=fd, x22=buf, x23=count
     ; Get file info from process fd table
 e0 03 15 aa  # mov x0, x21
-59 04 00 94  # bl fd_to_file_index
+66 04 00 94  # bl fd_to_file_index
 f9 03 00 aa  # mov x25, x0 # x25 = global file index
 
     ; Get file_address and file_length from global descriptor
@@ -655,7 +655,7 @@ f9 03 00 aa  # mov x25, x0 # x25 = global file index
 3b 05 40 f9  # ldr x27, [x9, #8] # file_length
 
     ; Get current_offset from process fd
-b5 03 00 94  # bl get_process_base
+c2 03 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200
 a9 f2 7d d3  # lsl x9, x21, #3
 1c 00 09 8b  # add x28, x0, x9 # x28 = &open_files[fd]
@@ -703,7 +703,7 @@ b5 02 09 8b  # add x21, x21, x9
 
     ; Resolve to absolute path
 e0 03 15 aa  # mov x0, x21
-a3 03 00 94  # bl absolute_path
+b0 03 00 94  # bl absolute_path
 f5 03 00 aa  # mov x21, x0 # x21 = absolute path in scratch buffer
 
     ; Check O_CREAT (bit 6 = 0x40)
@@ -712,7 +712,7 @@ e9 00 00 b5  # cbnz x9, openat_create
 
     ; Open existing file
 e0 03 15 aa  # mov x0, x21
-18 04 00 94  # bl find_file
+25 04 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
 eb 07 00 54  # b.lt openat_fail
 f7 03 00 aa  # mov x23, x0 # x23 = file index
@@ -744,7 +744,7 @@ f9 03 0a aa  # mov x25, x10 # save slash position
 38 03 40 39  # ldrb w24, [x25]
 3f 03 00 39  # strb wzr, [x25]
 e0 03 15 aa  # mov x0, x21
-04 04 00 94  # bl find_file
+11 04 00 94  # bl find_file
 38 03 00 39  # strb w24, [x25] # restore slash
 1f 00 00 f1  # cmp x0, #0
 4b 05 00 54  # b.lt openat_fail
@@ -791,7 +791,7 @@ ea ee 7c d3  # lsl x10, x23, #4
 
 #:openat_alloc_fd
     ; Allocate a process fd slot (start from fd 4)
-66 03 00 94  # bl get_process_base
+73 03 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200 # open_files array
 89 00 80 d2  # mov x9, #4 # start fd
 0a 38 80 d2  # mov x10, #448 # max entries
@@ -825,7 +825,7 @@ ff fe ff 17  # b trap_exit
 #:syscall_close
 f5 03 40 f9  # ldr x21, [sp, #0]
 
-52 03 00 94  # bl get_process_base
+5f 03 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200 # open_files
 a9 f2 7d d3  # lsl x9, x21, #3
 00 00 09 8b  # add x0, x0, x9
@@ -843,7 +843,7 @@ f5 03 40 f9  # ldr x21, [sp, #0] # fd
 f6 07 40 f9  # ldr x22, [sp, #8] # offset
 f7 0b 40 f9  # ldr x23, [sp, #16] # whence
 
-48 03 00 94  # bl get_process_base
+55 03 00 94  # bl get_process_base
 00 00 08 91  # add x0, x0, #0x200
 a9 f2 7d d3  # lsl x9, x21, #3
 18 00 09 8b  # add x24, x0, x9 # x24 = &open_files[fd]
@@ -890,7 +890,7 @@ b5 02 09 8b  # add x21, x21, x9
 
     ; Resolve to absolute path
 e0 03 15 aa  # mov x0, x21
-33 03 00 94  # bl absolute_path
+40 03 00 94  # bl absolute_path
 f5 03 00 aa  # mov x21, x0
 
     ; Special case: "/" always exists (skip find_file)
@@ -903,7 +903,7 @@ a9 06 40 39  # ldrb w9, [x21, #1]
 #:chdir_find
     ; Find the file
 e0 03 15 aa  # mov x0, x21
-a5 03 00 94  # bl find_file
+b2 03 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
 4b 03 00 54  # b.lt chdir_fail
 
@@ -916,7 +916,7 @@ aa 02 00 b5  # cbnz x10, chdir_fail # not a directory
 
 #:chdir_copy_path
     ; Copy path to process current_dir
-1c 03 00 94  # bl get_process_base
+29 03 00 94  # bl get_process_base
 16 00 04 91  # add x22, x0, #0x100 # dest = proc->current_dir
 
 e9 03 15 aa  # mov x9, x21 # source
@@ -960,7 +960,7 @@ f6 07 40 f9  # ldr x22, [sp, #8] # size
 09 00 a8 d2  # movz x9, #0x4000, lsl #16
 b5 02 09 8b  # add x21, x21, x9
 
-01 03 00 94  # bl get_process_base
+0e 03 00 94  # bl get_process_base
 00 00 04 91  # add x0, x0, #0x100 # current_dir
 e9 03 00 aa  # mov x9, x0 # src
 ea 03 15 aa  # mov x10, x21 # dest
@@ -1017,8 +1017,8 @@ f5 07 40 f9  # ldr x21, [sp, #8] # pathname (x1, VA)
 b5 02 09 8b  # add x21, x21, x9
 
 e0 03 15 aa  # mov x0, x21
-e5 02 00 94  # bl absolute_path
-5e 03 00 94  # bl find_file
+f2 02 00 94  # bl absolute_path
+6b 03 00 94  # bl find_file
 
 1f 00 00 f1  # cmp x0, #0
 6b 00 00 54  # b.lt faccessat_fail
@@ -1043,7 +1043,7 @@ b5 02 09 8b  # add x21, x21, x9
 
     ; Resolve to absolute path
 e0 03 15 aa  # mov x0, x21
-d8 02 00 94  # bl absolute_path
+e5 02 00 94  # bl absolute_path
 f5 03 00 aa  # mov x21, x0
 
     ; Check parent directory exists (find last '/')
@@ -1067,7 +1067,7 @@ f9 03 0a aa  # mov x25, x10 # save slash position
 38 03 40 39  # ldrb w24, [x25]
 3f 03 00 39  # strb wzr, [x25]
 e0 03 15 aa  # mov x0, x21
-41 03 00 94  # bl find_file
+4e 03 00 94  # bl find_file
 38 03 00 39  # strb w24, [x25] # restore slash
 1f 00 00 f1  # cmp x0, #0
 8b 03 00 54  # b.lt mkdirat_fail
@@ -1130,7 +1130,7 @@ ff 03 00 f9  # str xzr, [sp, #0]
 ;============================================================
 #:syscall_clone
     ; Get current process descriptor
-9c 02 00 94  # bl get_process_base
+a9 02 00 94  # bl get_process_base
 f5 03 00 aa  # mov x21, x0 # x21 = proc base
 
     ; Save brk to saved_brk (+0x28)
@@ -1166,7 +1166,7 @@ aa 2a 00 f9  # str x10, [x21, #0x50] # save stack length
 e0 03 16 aa  # mov x0, x22 # dest = save area
 e1 03 00 91  # mov x1, sp # src = current sp
 e2 03 0a aa  # mov x2, x10 # len
-d3 01 00 94  # bl memcpy
+e0 01 00 94  # bl memcpy
 
     ; Advance next_save_process_address
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
@@ -1192,7 +1192,7 @@ a2 22 00 f9  # str x2, [x21, #0x40] # saved_process_mem_len
     ; Copy process memory
 e0 03 19 aa  # mov x0, x25 # dest
 e1 03 17 aa  # mov x1, x23 # src = process_address (PA)
-c2 01 00 94  # bl memcpy
+cf 01 00 94  # bl memcpy
 
     ; Advance next_save_process_address
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
@@ -1230,7 +1230,7 @@ b8 32 00 f9  # str x24, [x21, #0x60] # saved_user_stack_len
 e0 03 19 aa  # mov x0, x25 # dest
 e1 03 17 aa  # mov x1, x23 # src = user sp (PA)
 e2 03 18 aa  # mov x2, x24 # len
-a9 01 00 94  # bl memcpy
+b6 01 00 94  # bl memcpy
 
     ; Advance next_save_process_address
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
@@ -1301,16 +1301,16 @@ e9 03 15 aa  # mov x9, x21 # src = pathname (kernel VA)
 15 80 80 f2  # movk x21, #0x0400
 
     ; Check if current process forked
-2d 02 00 94  # bl get_process_base
+3a 02 00 94  # bl get_process_base
 f8 03 00 aa  # mov x24, x0 # current proc
 09 13 40 f9  # ldr x9, [x24, #0x20] # forked flag
-69 01 00 b5  # cbnz x9, execve_forked
+c9 01 00 b5  # cbnz x9, execve_forked
 
     ; Not forked: check if first process
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
 2a 11 40 f9  # ldr x10, [x9, #0x20] # next_process_num
 5f 05 00 f1  # cmp x10, #1
-41 01 00 54  # b.ne execve_overlay
+01 02 00 54  # b.ne execve_overlay
 
     ; First process: save original sp at proc[1]+0x10
 09 08 ac d2  # movz x9, #0x6040, lsl #16 # 0x40400000
@@ -1318,16 +1318,26 @@ f8 03 00 aa  # mov x24, x0 # current proc
 29 01 0a 8b  # add x9, x9, x10 # proc[1] = 0x60401000
 ea 03 00 91  # mov x10, sp
 2a 09 00 f9  # str x10, [x9, #0x10] # save kernel sp for return-to-shell
-05 00 00 14  # b execve_prepare_stack
+09 06 a8 d2  # movz x9, #0x4030, lsl #16
+2a 00 80 d2  # mov x10, #1
+2a d1 01 f9  # str x10, [x9, #0x3A0] # create_new_process = 1 (first process)
+0a 00 00 14  # b execve_prepare_stack
 
 #:execve_forked
     ; Forked: create new process after fork
 29 05 00 d1  # sub x9, x9, #1
 09 13 00 f9  # str x9, [x24, #0x20]
-02 00 00 14  # b execve_prepare_stack
+09 06 a8 d2  # movz x9, #0x4030, lsl #16
+2a 00 80 d2  # mov x10, #1
+2a d1 01 f9  # str x10, [x9, #0x3A0] # create_new_process = 1 (exec after fork)
+04 00 00 14  # b execve_prepare_stack
 
 #:execve_overlay
-    ; Not forked, not first: overlay current process
+    ; Not forked, not first: overlay current process. An exec WITHOUT a fork
+    ; REPLACES the caller (x86 parity: builder-hex0 x86 bumps next_process_num
+    ; only in the forked case): same descriptor, no new process level.
+09 06 a8 d2  # movz x9, #0x4030, lsl #16
+3f d1 01 f9  # str xzr, [x9, #0x3A0] # create_new_process = 0 (overlay)
 01 00 00 14  # b execve_prepare_stack
 
 #:execve_prepare_stack
@@ -1374,7 +1384,7 @@ ea 01 00 b4  # cbz x10, execve_argv_done
     ; Copy string from x1 to x27 (256 bytes max)
 e0 03 1b aa  # mov x0, x27 # dest (PA)
 02 20 80 d2  # mov x2, #256
-4f 01 00 94  # bl memcpy
+54 01 00 94  # bl memcpy
 
     ; Calculate VA for this string: VA = PA - 0x40000000
 0a 00 a8 d2  # movz x10, #0x4000, lsl #16
@@ -1415,7 +1425,7 @@ e2 01 00 54  # b.hs execve_envp_done # out of valid VA range
 7b 03 04 d1  # sub x27, x27, #256
 e0 03 1b aa  # mov x0, x27 # dest (PA)
 02 20 80 d2  # mov x2, #256
-36 01 00 94  # bl memcpy
+3b 01 00 94  # bl memcpy
 
 0a 00 a8 d2  # movz x10, #0x4000, lsl #16
 6a 03 0a cb  # sub x10, x27, x10 # VA
@@ -1489,12 +1499,12 @@ f9 ff ff 17  # b execve_push_argv
     ; --- Load ELF ---
     ; Resolve program name
 e0 03 15 aa  # mov x0, x21
-c1 01 00 94  # bl absolute_path
+c6 01 00 94  # bl absolute_path
 f5 03 00 aa  # mov x21, x0
 e0 03 15 aa  # mov x0, x21
-38 02 00 94  # bl find_file
+3d 02 00 94  # bl find_file
 1f 00 00 f1  # cmp x0, #0
-ab 0a 00 54  # b.lt execve_fail
+4b 0b 00 54  # b.lt execve_fail
 fb 03 00 aa  # mov x27, x0 # x27 = file index
 
     ; Get file address and length
@@ -1504,17 +1514,31 @@ fb 03 00 aa  # mov x27, x0 # x27 = file index
 3c 01 40 f9  # ldr x28, [x9, #0] # file_address (PA)
 33 05 40 f9  # ldr x19, [x9, #8] # file_length
 
-    ; Increment next_process_num
+    ; Increment next_process_num ONLY when a new process level is created
+    ; (forked or first exec). A fork-less exec overlays the current process:
+    ; same descriptor, no bump (x86 parity). The old unconditional bump made
+    ; stage0's fork-less kaem chains leak a bogus process level, so the chained
+    ; process's clone saves landed at the still-live parent's save-area base,
+    ; corrupting the parent's saved image -> restored kaem got mixed-epoch
+    ; state -> kernel/user brk divergence -> malloc handed out memory beyond
+    ; the kernel brk (stale child residue) -> deferred post-Hello UDF at EOF.
 09 06 a8 d2  # movz x9, #0x4030, lsl #16
+2a d1 41 f9  # ldr x10, [x9, #0x3A0] # create_new_process?
+8a 00 00 b4  # cbz x10, execve_same_level
 2a 11 40 f9  # ldr x10, [x9, #0x20]
 4a 05 00 91  # add x10, x10, #1
 2a 11 00 f9  # str x10, [x9, #0x20]
+#:execve_same_level
 
-    ; Get new process descriptor
-aa 01 00 94  # bl get_process_base
-f8 03 00 aa  # mov x24, x0 # x24 = new proc descriptor
+    ; Get the process descriptor (new level, or the caller's own on overlay)
+ad 01 00 94  # bl get_process_base
+f8 03 00 aa  # mov x24, x0 # x24 = proc descriptor
 
-    ; Copy cwd from previous process
+    ; Copy cwd from previous process (only for a NEW process level; an
+    ; overlaid process keeps its own CWD)
+09 06 a8 d2  # movz x9, #0x4030, lsl #16
+29 d1 41 f9  # ldr x9, [x9, #0x3A0]
+a9 01 00 b4  # cbz x9, execve_cwd_done
 09 00 82 d2  # movz x9, #0x1000
 09 03 09 cb  # sub x9, x24, x9 # prev proc
 2a 01 04 91  # add x10, x9, #0x100 # prev cwd
@@ -1641,7 +1665,7 @@ e0 03 9f d6  # eret
 #:execve_fail
 09 00 80 92  # movn x9, #0
 e9 03 00 f9  # str x9, [sp, #0]
-09 fd ff 17  # b trap_exit
+fc fc ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_exit: exit(code)
@@ -1710,7 +1734,7 @@ df 3f 03 d5  # isb
     ; Return 1 (parent return from fork)
 29 00 80 d2  # mov x9, #1
 e9 03 00 f9  # str x9, [sp, #0] # x0 = 1 in trap frame
-e3 fc ff 17  # b trap_exit
+d6 fc ff 17  # b trap_exit
 
 #:exit_to_shell
     ; Restore kernel sp from proc[1]+0x10
@@ -1744,7 +1768,7 @@ aa 00 00 b4  # cbz x10, waitid_no_write
 
 #:waitid_no_write
 ff 03 00 f9  # str xzr, [sp, #0] # return 0
-d3 fc ff 17  # b trap_exit
+c6 fc ff 17  # b trap_exit
 
 ;============================================================
 ; syscall_wait4: wait4(pid, wstatus, options, rusage)
@@ -1770,7 +1794,7 @@ aa 00 00 b4  # cbz x10, wait4_no_write
     ; Return child pid (1)
 29 00 80 d2  # mov x9, #1
 e9 03 00 f9  # str x9, [sp, #0]
-c8 fc ff 17  # b trap_exit
+bb fc ff 17  # b trap_exit
 
 ;============================================================
 ; uart_putchar: Print character in x0 via PL011 UART
@@ -4153,7 +4177,7 @@ fa 03 02 aa  # mov x26, x2
 e6 f9 ff 97  # bl load_ram_base
 
     ; Set up exception vector table
-69 7b fe 10  # adr x9, exception_vectors
+c9 79 fe 10  # adr x9, exception_vectors
 09 c0 18 d5  # msr vbar_el1, x9
 
     ; Disable all EL1 interrupts
