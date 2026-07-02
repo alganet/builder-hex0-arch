@@ -1318,16 +1318,26 @@ execve_copy_done:
     add x9, x9, x10              ; proc[1] = 0x60401000
     mov x10, sp
     str x10, [x9, #0x10]         ; save kernel sp for return-to-shell
+    movz x9, #0x4030, lsl #16
+    mov x10, #1
+    str x10, [x9, #0x3A0]        ; create_new_process = 1 (first process)
     b execve_prepare_stack
 
 execve_forked:
     ; Forked: create new process after fork
     sub x9, x9, #1
     str x9, [x24, #0x20]
+    movz x9, #0x4030, lsl #16
+    mov x10, #1
+    str x10, [x9, #0x3A0]        ; create_new_process = 1 (exec after fork)
     b execve_prepare_stack
 
 execve_overlay:
-    ; Not forked, not first: overlay current process
+    ; Not forked, not first: overlay current process. An exec WITHOUT a fork
+    ; REPLACES the caller (x86 parity: builder-hex0 x86 bumps next_process_num
+    ; only in the forked case): same descriptor, no new process level.
+    movz x9, #0x4030, lsl #16
+    str xzr, [x9, #0x3A0]        ; create_new_process = 0 (overlay)
     b execve_prepare_stack
 
 execve_prepare_stack:
@@ -1504,17 +1514,31 @@ execve_push_argc:
     ldr x28, [x9, #0]            ; file_address (PA)
     ldr x19, [x9, #8]            ; file_length
 
-    ; Increment next_process_num
+    ; Increment next_process_num ONLY when a new process level is created
+    ; (forked or first exec). A fork-less exec overlays the current process:
+    ; same descriptor, no bump (x86 parity). The old unconditional bump made
+    ; stage0's fork-less kaem chains leak a bogus process level, so the chained
+    ; process's clone saves landed at the still-live parent's save-area base,
+    ; corrupting the parent's saved image -> restored kaem got mixed-epoch
+    ; state -> kernel/user brk divergence -> malloc handed out memory beyond
+    ; the kernel brk (stale child residue) -> deferred post-Hello UDF at EOF.
     movz x9, #0x4030, lsl #16
+    ldr x10, [x9, #0x3A0]        ; create_new_process?
+    cbz x10, execve_same_level
     ldr x10, [x9, #0x20]
     add x10, x10, #1
     str x10, [x9, #0x20]
+execve_same_level:
 
-    ; Get new process descriptor
+    ; Get the process descriptor (new level, or the caller's own on overlay)
     bl get_process_base
-    mov x24, x0                  ; x24 = new proc descriptor
+    mov x24, x0                  ; x24 = proc descriptor
 
-    ; Copy cwd from previous process
+    ; Copy cwd from previous process (only for a NEW process level; an
+    ; overlaid process keeps its own CWD)
+    movz x9, #0x4030, lsl #16
+    ldr x9, [x9, #0x3A0]
+    cbz x9, execve_cwd_done
     movz x9, #0x1000
     sub x9, x24, x9              ; prev proc
     add x10, x9, #0x100          ; prev cwd
