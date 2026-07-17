@@ -58,6 +58,8 @@
 #   +0x088: disk_read_fn (8 bytes)   [function pointer, set by storage driver]
 #   +0x090: disk_write_fn (8 bytes)  [function pointer, set by storage driver]
 #   +0x098: spi_base (8 bytes)       [SPI+SD only, used by spi_transfer]
+#   +0x0A0: create_new_process (8 bytes) [execve: 1 = forked/first (new
+#           process level), 0 = fork-less exec (overlay the caller)]
 #
 # Process descriptor (4096 bytes each, at 0x80400000):
 #   +0x000: process_address (8)
@@ -100,7 +102,7 @@
 # Trap handler at offset 4 from binary start
 
 #:_start
-6f 20 c0 3d  # jal zero, main
+6f 20 00 42  # jal zero, main
 
 #============================================================
 # Trap handler (at offset 4 = address 0x80210004)
@@ -128,7 +130,7 @@ b7 02 f8 53  # lui t0, 0x53F80
 23 38 91 00  # sd s1, 16(sp)
 13 04 03 00  # mv s0, t1
 f3 24 00 14  # csrrs s1, sscratch, zero
-6f 00 10 79  # j reboot
+6f 00 50 7d  # j reboot
 #:trap_sp_ok
 # Allocate trap frame (256 bytes = 32 slots of 8 bytes)
 13 01 01 f0  # addi sp, sp, -256
@@ -180,7 +182,7 @@ f3 22 20 14  # csrrs t0, scause, zero
 # Not ecall from U-mode: terminate process with exit code 139
 93 02 b0 08  # li t0, 139
 23 34 51 04  # sd t0, 72(sp)
-6f 00 d0 4a  # j syscall_exit
+6f 00 10 4f  # j syscall_exit
 
 # Dispatch syscall based on a7
 #:dispatch
@@ -233,7 +235,7 @@ f3 22 20 14  # csrrs t0, scause, zero
 #:tramp_write
 6f 00 c0 0e  # j syscall_write
 #:tramp_exit
-6f 00 50 40  # j syscall_exit
+6f 00 90 44  # j syscall_exit
 #:tramp_brk
 6f 00 00 1b  # j syscall_brk
 #:tramp_read
@@ -257,9 +259,9 @@ f3 22 20 14  # csrrs t0, scause, zero
 #:tramp_execve
 6f 00 90 04  # j syscall_execve
 #:tramp_waitid
-6f 00 d0 48  # j syscall_waitid
+6f 00 10 4d  # j syscall_waitid
 #:tramp_wait4
-6f 00 90 4b  # j syscall_wait4
+6f 00 d0 4f  # j syscall_wait4
 #:tramp_stub
 6f 00 40 70  # j syscall_stub_zero
 
@@ -344,7 +346,7 @@ b7 02 00 40  # lui t0, 0x40000
 #:write_loop
 63 8c 0a 00  # beqz s5, write_done
 03 45 0a 00  # lbu a0, 0(s4)
-ef 00 50 40  # call sbi_putchar
+ef 00 90 44  # call sbi_putchar
 13 0a 1a 00  # addi s4, s4, 1
 93 8a fa ff  # addi s5, s5, -1
 6f f0 df fe  # j write_loop
@@ -357,7 +359,7 @@ ef 00 50 40  # call sbi_putchar
 # s3=fd, s4=buf, s5=count, s6=original count
 # Get file info from process fd table
 13 85 09 00  # mv a0, s3
-ef 10 00 13  # call fd_to_file_index
+ef 10 40 17  # call fd_to_file_index
 93 0b 05 00  # mv s7, a0
 
 # Get file_address and file_length from global descriptor
@@ -369,7 +371,7 @@ b7 02 41 50  # lui t0, 0x50410
 03 3d 8c 00  # ld s10, 8(s8)
 
 # Get current_offset from process fd
-ef 00 10 6a  # call get_process_base
+ef 00 50 6e  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 b3 0d 55 00  # add s11, a0, t0
@@ -518,7 +520,7 @@ b7 02 18 40  # lui t0, 0x40180
 13 05 03 00  # mv a0, t1
 b7 85 00 50  # lui a1, 0x50008
 93 95 15 00  # slli a1, a1, 1
-ef 10 00 38  # call disk_read_sector
+ef 10 40 3c  # call disk_read_sector
 # Advance sector, reset offset
 b7 02 18 40  # lui t0, 0x40180
 93 92 12 00  # slli t0, t0, 1
@@ -557,7 +559,7 @@ b7 02 18 40  # lui t0, 0x40180
 # s3=fd, s4=buf, s5=count
 # Get file info from process fd table
 13 85 09 00  # mv a0, s3
-ef 00 d0 78  # call fd_to_file_index
+ef 00 10 7d  # call fd_to_file_index
 93 0b 05 00  # mv s7, a0
 
 # Get file_address and file_length from global descriptor
@@ -569,7 +571,7 @@ b3 82 62 00  # add t0, t0, t1
 83 bc 82 00  # ld s9, 8(t0)
 
 # Get current_offset from process fd
-ef 00 d0 4f  # call get_process_base
+ef 00 10 54  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 0d 55 00  # add s10, a0, t0
@@ -619,7 +621,7 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 d0 4b  # call absolute_path
+ef 00 10 50  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Check O_CREAT (bit 6 = 0x40)
@@ -628,7 +630,7 @@ ef 00 d0 4b  # call absolute_path
 
 # Open existing file
 13 85 09 00  # mv a0, s3
-ef 00 d0 67  # call find_file
+ef 00 10 6c  # call find_file
 63 4a 05 0e  # bltz a0, openat_fail
 93 0a 05 00  # mv s5, a0
 
@@ -658,7 +660,7 @@ ef 00 d0 67  # call find_file
 03 cb 0b 00  # lbu s6, 0(s7)
 23 80 0b 00  # sb zero, 0(s7)
 13 85 09 00  # mv a0, s3
-ef 00 50 63  # call find_file
+ef 00 90 67  # call find_file
 23 80 6b 01  # sb s6, 0(s7)
 63 44 05 0a  # bltz a0, openat_fail
 
@@ -705,7 +707,7 @@ b3 82 62 00  # add t0, t0, t1
 
 #:openat_alloc_fd
 # Allocate a process fd slot (start from fd 4)
-ef 00 90 3c  # call get_process_base
+ef 00 d0 40  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 02 40 00  # li t0, 4
 13 03 00 1c  # li t1, 448
@@ -738,7 +740,7 @@ b3 03 75 00  # add t2, a0, t2
 #:syscall_close
 83 39 81 04  # ld s3, 72(sp)
 
-ef 00 d0 37  # call get_process_base
+ef 00 10 3c  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 05 55 00  # add a0, a0, t0
@@ -757,7 +759,7 @@ ef 00 d0 37  # call get_process_base
 03 3a 01 05  # ld s4, 80(sp)
 83 3a 81 05  # ld s5, 88(sp)
 
-ef 00 50 35  # call get_process_base
+ef 00 90 39  # call get_process_base
 13 05 05 20  # addi a0, a0, 0x200
 93 92 39 00  # slli t0, s3, 3
 33 0b 55 00  # add s6, a0, t0
@@ -806,12 +808,12 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 10 30  # call absolute_path
+ef 00 50 34  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Find the file
 13 85 09 00  # mv a0, s3
-ef 00 90 4c  # call find_file
+ef 00 d0 50  # call find_file
 63 44 05 06  # bltz a0, chdir_fail
 
 # Check it's a directory (file_length == 0)
@@ -823,7 +825,7 @@ b3 82 62 00  # add t0, t0, t1
 63 18 03 04  # bnez t1, chdir_fail
 
 # Copy path to process current_dir
-ef 00 10 2b  # call get_process_base
+ef 00 50 2f  # call get_process_base
 13 0a 05 10  # addi s4, a0, 0x100
 
 93 82 09 00  # mv t0, s3
@@ -867,7 +869,7 @@ b7 02 00 40  # lui t0, 0x40000
 93 92 12 00  # slli t0, t0, 1
 b3 89 59 00  # add s3, s3, t0
 
-ef 00 50 24  # call get_process_base
+ef 00 90 28  # call get_process_base
 13 05 05 10  # addi a0, a0, 0x100
 93 02 05 00  # mv t0, a0
 13 83 09 00  # mv t1, s3
@@ -925,8 +927,8 @@ b7 02 00 40  # lui t0, 0x40000
 b3 89 59 00  # add s3, s3, t0
 
 13 85 09 00  # mv a0, s3
-ef 00 90 1d  # call absolute_path
-ef 00 90 3a  # call find_file
+ef 00 d0 21  # call absolute_path
+ef 00 d0 3e  # call find_file
 
 63 46 05 00  # bltz a0, faccessat_fail
 23 34 01 04  # sd zero, 72(sp)
@@ -952,7 +954,7 @@ b3 89 59 00  # add s3, s3, t0
 
 # Resolve to absolute path
 13 85 09 00  # mv a0, s3
-ef 00 50 1a  # call absolute_path
+ef 00 90 1e  # call absolute_path
 93 09 05 00  # mv s3, a0
 
 # Check parent directory exists (find last '/')
@@ -975,7 +977,7 @@ ef 00 50 1a  # call absolute_path
 03 cb 0b 00  # lbu s6, 0(s7)
 23 80 0b 00  # sb zero, 0(s7)
 13 85 09 00  # mv a0, s3
-ef 00 90 33  # call find_file
+ef 00 d0 37  # call find_file
 23 80 6b 01  # sb s6, 0(s7)
 63 4a 05 06  # bltz a0, mkdirat_fail
 
@@ -1038,7 +1040,7 @@ b3 82 62 00  # add t0, t0, t1
 #============================================================
 #:syscall_clone
 # Get current process descriptor
-ef 00 10 0b  # call get_process_base
+ef 00 50 0f  # call get_process_base
 93 09 05 00  # mv s3, a0
 
 # Save brk to saved_brk (+0x28)
@@ -1076,7 +1078,7 @@ b7 02 00 54  # lui t0, 0x54000
 13 05 0a 00  # mv a0, s4
 93 05 01 00  # mv a1, sp
 13 06 03 00  # mv a2, t1
-ef 00 40 6d  # call memcpy
+ef 00 80 71  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1112,7 +1114,7 @@ b7 02 18 40  # lui t0, 0x40180
 # Copy process memory
 13 85 0b 00  # mv a0, s7
 93 85 0a 00  # mv a1, s5
-ef 00 c0 67  # call memcpy
+ef 00 00 6c  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1144,7 +1146,7 @@ b7 02 18 40  # lui t0, 0x40180
 13 85 0b 00  # mv a0, s7
 93 85 0a 00  # mv a1, s5
 13 06 0b 00  # mv a2, s6
-ef 00 40 62  # call memcpy
+ef 00 80 66  # call memcpy
 
 # Advance next_save_process_address
 b7 02 18 40  # lui t0, 0x40180
@@ -1175,17 +1177,17 @@ b3 89 59 00  # add s3, s3, t0
 b3 8a 5a 00  # add s5, s5, t0
 
 # Check if current process forked (check BEFORE first-process check)
-ef 00 00 76  # call get_process_base
+ef 00 40 7a  # call get_process_base
 13 0b 05 00  # mv s6, a0
 83 32 0b 02  # ld t0, 0x20(s6)
-63 98 02 02  # bnez t0, execve_forked
+63 90 02 04  # bnez t0, execve_forked
 
 # Not forked: check if first process (direct exec from shell)
 b7 02 18 40  # lui t0, 0x40180
 93 92 12 00  # slli t0, t0, 1
 03 b3 02 02  # ld t1, 0x20(t0)
 93 03 10 00  # li t2, 1
-63 14 73 02  # bne t1, t2, execve_overlay
+63 14 73 04  # bne t1, t2, execve_overlay
 
 # First process: save original sp at proc[1]+0x10
 b7 02 20 40  # lui t0, 0x40200
@@ -1193,17 +1195,30 @@ b7 02 20 40  # lui t0, 0x40200
 37 13 00 00  # lui t1, 1
 b3 82 62 00  # add t0, t0, t1
 23 b8 22 00  # sd sp, 0x10(t0)
-6f 00 40 01  # j execve_prepare_stack
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+13 03 10 00  # li t1, 1
+23 b0 62 0a  # sd t1, 0xA0(t0)
+6f 00 00 03  # j execve_prepare_stack
 
 #:execve_forked
 # Forked: create new process after fork
 # Decrement forked flag
 93 82 f2 ff  # addi t0, t0, -1
 23 30 5b 02  # sd t0, 0x20(s6)
-6f 00 80 00  # j execve_prepare_stack
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+13 03 10 00  # li t1, 1
+23 b0 62 0a  # sd t1, 0xA0(t0)
+6f 00 40 01  # j execve_prepare_stack
 
 #:execve_overlay
-# Not forked, not first: overlay current process (same slot)
+# Not forked, not first: overlay current process. An exec WITHOUT a fork
+# REPLACES the caller (x86 parity: builder-hex0 x86 bumps next_process_num
+# only in the forked case): same descriptor, no new process level.
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+23 b0 02 0a  # sd zero, 0xA0(t0)
 6f 00 40 00  # j execve_prepare_stack
 
 #:execve_prepare_stack
@@ -1256,7 +1271,7 @@ b3 05 73 00  # add a1, t1, t2
 # Copy string from a1 to s9 (256 bytes max)
 13 85 0c 00  # mv a0, s9
 13 06 00 10  # li a2, 256
-ef 00 c0 52  # call memcpy
+ef 00 40 54  # call memcpy
 
 # Calculate VA for this string: VA = PA - 0x80000000
 37 03 00 40  # lui t1, 0x40000
@@ -1299,7 +1314,7 @@ b3 05 73 00  # add a1, t1, t2
 93 8c 0c f0  # addi s9, s9, -256
 13 85 0c 00  # mv a0, s9
 13 06 00 10  # li a2, 256
-ef 00 00 4c  # call memcpy
+ef 00 80 4d  # call memcpy
 
 37 03 00 40  # lui t1, 0x40000
 13 13 13 00  # slli t1, t1, 1
@@ -1382,11 +1397,11 @@ b7 02 00 40  # lui t0, 0x40000
 # --- Load ELF ---
 # Resolve program name
 13 85 09 00  # mv a0, s3
-ef 00 80 59  # call absolute_path
+ef 00 00 5b  # call absolute_path
 93 09 05 00  # mv s3, a0
 13 85 09 00  # mv a0, s3
-ef 00 00 76  # call find_file
-63 44 05 16  # bltz a0, execve_fail
+ef 00 80 77  # call find_file
+63 40 05 18  # bltz a0, execve_fail
 93 0c 05 00  # mv s9, a0
 
 # Get file address and length
@@ -1397,19 +1412,33 @@ b3 82 62 00  # add t0, t0, t1
 03 bd 02 00  # ld s10, 0(t0)
 83 bd 82 00  # ld s11, 8(t0)
 
-# Increment next_process_num (for new process)
+# Increment next_process_num ONLY when a new process level is created
+# (forked or first exec). A fork-less exec overlays the current process:
+# same descriptor, no bump (x86 parity, and the same fix aarch64 needed).
+# The old unconditional bump made stage0's fork-less kaem chains leak a
+# bogus process level, so the chained process's clone saves landed at the
+# still-live parent's save-area base, corrupting the parent's saved image;
+# a later restore then resurrected mixed-epoch state and the next exec'd
+# program faulted.
 b7 02 18 40  # lui t0, 0x40180
 93 92 12 00  # slli t0, t0, 1
+03 b3 02 0a  # ld t1, 0xA0(t0)
+63 08 03 00  # beqz t1, execve_same_level
 03 b3 02 02  # ld t1, 0x20(t0)
 13 03 13 00  # addi t1, t1, 1
 23 b0 62 02  # sd t1, 0x20(t0)
+#:execve_same_level
 
-# Get new process descriptor
-ef 00 00 53  # call get_process_base
+# Get the process descriptor (new level, or the caller's own on overlay)
+ef 00 00 54  # call get_process_base
 13 0b 05 00  # mv s6, a0
 
-# Copy cwd from previous process
-# Previous process = s6 - 0x1000
+# Copy cwd from previous process (only for a NEW process level; an
+# overlaid process keeps its own CWD)
+b7 02 18 40  # lui t0, 0x40180
+93 92 12 00  # slli t0, t0, 1
+83 b2 02 0a  # ld t0, 0xA0(t0)
+63 8a 02 02  # beqz t0, execve_cwd_done
 b7 12 00 00  # lui t0, 1
 b3 02 5b 40  # sub t0, s6, t0
 13 83 02 10  # addi t1, t0, 0x100
@@ -1546,7 +1575,7 @@ b7 02 18 40  # lui t0, 0x40180
 #:execve_fail
 93 02 f0 ff  # li t0, -1
 23 34 51 04  # sd t0, 72(sp)
-6f f0 cf c3  # j trap_exit
+6f f0 8f bf  # j trap_exit
 
 #============================================================
 # syscall_exit: exit(code)
@@ -1618,7 +1647,7 @@ ef 00 80 1e  # call memcpy
 # Return 1 (parent return from fork)
 93 02 10 00  # li t0, 1
 23 34 51 04  # sd t0, 72(sp)
-6f f0 cf b9  # j trap_exit
+6f f0 8f b5  # j trap_exit
 
 #:exit_to_shell
 # Restore kernel sp from proc[1]+0x10 (fixed location)
@@ -1661,7 +1690,7 @@ b7 03 00 40  # lui t2, 0x40000
 
 #:waitid_no_write
 23 34 01 04  # sd zero, 72(sp)
-6f f0 4f b5  # j trap_exit
+6f f0 0f b1  # j trap_exit
 
 #============================================================
 # syscall_wait4: wait4(pid, wstatus, options, rusage)
@@ -1690,7 +1719,7 @@ b7 03 00 40  # lui t2, 0x40000
 # Return child pid (1 = any child)
 93 02 10 00  # li t0, 1
 23 34 51 04  # sd t0, 72(sp)
-6f f0 4f b2  # j trap_exit
+6f f0 0f ae  # j trap_exit
 
 #============================================================
 # sbi_putchar: Print character in a0 via SBI legacy ext 0x01

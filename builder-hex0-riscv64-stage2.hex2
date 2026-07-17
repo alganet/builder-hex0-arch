@@ -58,6 +58,8 @@
 #   +0x088: disk_read_fn (8 bytes)   [function pointer, set by storage driver]
 #   +0x090: disk_write_fn (8 bytes)  [function pointer, set by storage driver]
 #   +0x098: spi_base (8 bytes)       [SPI+SD only, used by spi_transfer]
+#   +0x0A0: create_new_process (8 bytes) [execve: 1 = forked/first (new
+#           process level), 0 = fork-less exec (overlay the caller)]
 #
 # Process descriptor (4096 bytes each, at 0x80400000):
 #   +0x000: process_address (8)
@@ -1193,6 +1195,10 @@ $trap_exit 6F000000  # j trap_exit
 .00030000 .00100000 37000000  # lui t1, 1
 .80020000 .00800200 .00006000 33000000  # add t0, t0, t1
 .00800200 .00002000 .00080000 23300000  # sd sp, 0x10(t0)
+.80020000 .00001840 37000000  # lui t0, 0x40180
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00030000 .00001000 13000000  # li t1, 1
+.00800200 .00006000 .0000000A 23300000  # sd t1, 0xA0(t0)
 $execve_prepare_stack 6F000000  # j execve_prepare_stack
 
 :execve_forked
@@ -1200,10 +1206,19 @@ $execve_prepare_stack 6F000000  # j execve_prepare_stack
 # Decrement forked flag
 .80020000 .00800200 .0000F0FF 13000000  # addi t0, t0, -1
 .00000B00 .00005000 .00000002 23300000  # sd t0, 0x20(s6)
+.80020000 .00001840 37000000  # lui t0, 0x40180
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00030000 .00001000 13000000  # li t1, 1
+.00800200 .00006000 .0000000A 23300000  # sd t1, 0xA0(t0)
 $execve_prepare_stack 6F000000  # j execve_prepare_stack
 
 :execve_overlay
-# Not forked, not first: overlay current process (same slot)
+# Not forked, not first: overlay current process. An exec WITHOUT a fork
+# REPLACES the caller (x86 parity: builder-hex0 x86 bumps next_process_num
+# only in the forked case): same descriptor, no new process level.
+.80020000 .00001840 37000000  # lui t0, 0x40180
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00800200 .00000000 .0000000A 23300000  # sd zero, 0xA0(t0)
 $execve_prepare_stack 6F000000  # j execve_prepare_stack
 
 :execve_prepare_stack
@@ -1397,19 +1412,33 @@ $execve_push_argv 6F000000  # j execve_push_argv
 .000D0000 .00800200 .00000000 03300000  # ld s10, 0(t0)
 .800D0000 .00800200 .00008000 03300000  # ld s11, 8(t0)
 
-# Increment next_process_num (for new process)
+# Increment next_process_num ONLY when a new process level is created
+# (forked or first exec). A fork-less exec overlays the current process:
+# same descriptor, no bump (x86 parity, and the same fix aarch64 needed).
+# The old unconditional bump made stage0's fork-less kaem chains leak a
+# bogus process level, so the chained process's clone saves landed at the
+# still-live parent's save-area base, corrupting the parent's saved image;
+# a later restore then resurrected mixed-epoch state and the next exec'd
+# program faulted.
 .80020000 .00001840 37000000  # lui t0, 0x40180
 .80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.00030000 .00800200 .0000000A 03300000  # ld t1, 0xA0(t0)
+.00000300 @execve_same_level 63000000  # beqz t1, execve_same_level
 .00030000 .00800200 .00000002 03300000  # ld t1, 0x20(t0)
 .00030000 .00000300 .00001000 13000000  # addi t1, t1, 1
 .00800200 .00006000 .00000002 23300000  # sd t1, 0x20(t0)
+:execve_same_level
 
-# Get new process descriptor
+# Get the process descriptor (new level, or the caller's own on overlay)
 .80000000 $get_process_base 6F000000  # call get_process_base
 .000B0000 .00000500 13000000  # mv s6, a0
 
-# Copy cwd from previous process
-# Previous process = s6 - 0x1000
+# Copy cwd from previous process (only for a NEW process level; an
+# overlaid process keeps its own CWD)
+.80020000 .00001840 37000000  # lui t0, 0x40180
+.80020000 .00800200 .00001000 13100000  # slli t0, t0, 1
+.80020000 .00800200 .0000000A 03300000  # ld t0, 0xA0(t0)
+.00800200 @execve_cwd_done 63000000  # beqz t0, execve_cwd_done
 .80020000 .00100000 37000000  # lui t0, 1
 .80020000 .00000B00 .00005000 33000040  # sub t0, s6, t0
 .00030000 .00800200 .00000010 13000000  # addi t1, t0, 0x100

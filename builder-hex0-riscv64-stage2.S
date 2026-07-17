@@ -58,6 +58,8 @@
 #   +0x088: disk_read_fn (8 bytes)   [function pointer, set by storage driver]
 #   +0x090: disk_write_fn (8 bytes)  [function pointer, set by storage driver]
 #   +0x098: spi_base (8 bytes)       [SPI+SD only, used by spi_transfer]
+#   +0x0A0: create_new_process (8 bytes) [execve: 1 = forked/first (new
+#           process level), 0 = fork-less exec (overlay the caller)]
 #
 # Process descriptor (4096 bytes each, at 0x80400000):
 #   +0x000: process_address (8)
@@ -1193,6 +1195,10 @@ syscall_execve:
     lui t1, 1                # 0x1000
     add t0, t0, t1           # proc[1] = 0x80401000
     sd sp, 0x10(t0)          # save kernel sp for return-to-shell
+    lui t0, 0x40180
+    slli t0, t0, 1
+    li t1, 1
+    sd t1, 0xA0(t0)          # create_new_process = 1 (first process)
     j execve_prepare_stack
 
 execve_forked:
@@ -1200,10 +1206,19 @@ execve_forked:
     # Decrement forked flag
     addi t0, t0, -1
     sd t0, 0x20(s6)
+    lui t0, 0x40180
+    slli t0, t0, 1
+    li t1, 1
+    sd t1, 0xA0(t0)          # create_new_process = 1 (exec after fork)
     j execve_prepare_stack
 
 execve_overlay:
-    # Not forked, not first: overlay current process (same slot)
+    # Not forked, not first: overlay current process. An exec WITHOUT a fork
+    # REPLACES the caller (x86 parity: builder-hex0 x86 bumps next_process_num
+    # only in the forked case): same descriptor, no new process level.
+    lui t0, 0x40180
+    slli t0, t0, 1
+    sd zero, 0xA0(t0)        # create_new_process = 0 (overlay)
     j execve_prepare_stack
 
 execve_prepare_stack:
@@ -1397,19 +1412,33 @@ execve_push_argc:
     ld s10, 0(t0)            # file_address (PA)
     ld s11, 8(t0)            # file_length
 
-    # Increment next_process_num (for new process)
+    # Increment next_process_num ONLY when a new process level is created
+    # (forked or first exec). A fork-less exec overlays the current process:
+    # same descriptor, no bump (x86 parity, and the same fix aarch64 needed).
+    # The old unconditional bump made stage0's fork-less kaem chains leak a
+    # bogus process level, so the chained process's clone saves landed at the
+    # still-live parent's save-area base, corrupting the parent's saved image;
+    # a later restore then resurrected mixed-epoch state and the next exec'd
+    # program faulted.
     lui t0, 0x40180
     slli t0, t0, 1
+    ld t1, 0xA0(t0)          # create_new_process?
+    beqz t1, execve_same_level
     ld t1, 0x20(t0)
     addi t1, t1, 1
     sd t1, 0x20(t0)
+execve_same_level:
 
-    # Get new process descriptor
+    # Get the process descriptor (new level, or the caller's own on overlay)
     call get_process_base
-    mv s6, a0                # s6 = new proc descriptor
+    mv s6, a0                # s6 = proc descriptor
 
-    # Copy cwd from previous process
-    # Previous process = s6 - 0x1000
+    # Copy cwd from previous process (only for a NEW process level; an
+    # overlaid process keeps its own CWD)
+    lui t0, 0x40180
+    slli t0, t0, 1
+    ld t0, 0xA0(t0)
+    beqz t0, execve_cwd_done
     lui t0, 1
     sub t0, s6, t0           # prev proc
     addi t1, t0, 0x100       # prev cwd
