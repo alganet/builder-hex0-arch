@@ -27,16 +27,29 @@
 ;   0x60400000  Process descriptors (16 x 4096)
 ;   0x60820000  File descriptors (512KB, 32768 x 16 bytes)
 ;   0x7B800000  Kernel stack top (grows down)
-;   0x42000000  Preload buffer (8MB, raspi3b only, PA 0x02000000 slow zone)
+;   0x78000000  Preload buffer (8MB, raspi3b only -> PA 0x38000000). Must sit
+;               ABOVE the user brk cap (PA 0x0FF00000): it was at VA 0x42000000
+;               (PA 0x02000000), which is inside the user process window
+;               (PA 0x00600000 upwards), so any process with a heap over ~26MB
+;               overwrote it. mes self-compiling (a ~183MB arena) did exactly
+;               that, and the shell then read its own leftover heap back as
+;               stdin -- binary garbage echoed as "?" once the script ran out.
+;               PA 0x38000000 is the slot the saved-process area vacated: clear
+;               of the user window and the save area, 48MB below the kernel
+;               stack, and file data (from PA 0x21900000) never grows the 359MB
+;               it would take to reach it.
 ;   Saved process memory (bump allocator) -- BOARD-SPECIFIC base, because the
 ;   upper VA window maps to different PA on each board (see paging notes below):
 ;     virt    VA 0x80000000 (Entry 2 -> PA 0x80000000): ~540MB up to file data
 ;             at 0xA1900000, clear of the kernel stack at 0x7B800000. A single
 ;             fork saves a whole process image (tens of MB), so it must NOT
 ;             sit in Entry 1 below the kernel stack (that capped it at 56MB).
-;     raspi3b VA 0x78000000 (Entry 1 -> PA 0x38000000): valid in the 1GB RAM.
-;             0x80000000 is UNSAFE here -- raspi3b's Entry 2 aliases PA
-;             0x00000000, so it would overwrite the kernel in low RAM.
+;     raspi3b VA 0x90000000 (Entry 2 -> PA 0x10000000): a ~264MB hole above the
+;             user brk cap (PA 0x0FF00000) and below file names/data (PA
+;             0x20900000). VA 0x80000000 exactly would alias PA 0x00000000 (the
+;             kernel); 0x90000000 clears it. Replaces the legacy Entry-1 base VA
+;             0x78000000 (PA 0x38000000), which left only 56MB below the kernel
+;             stack -- too little for mes's ~183MB self-compile fork image.
 ;   0xA1900000  File data (bump allocator, grows up to 0xBFFFFFFF)
 ;
 ; AArch64 paging (1GB block descriptors, level 1 table):
@@ -2017,8 +2030,8 @@ EB0100B4  # cbz x11, rsb_per_sector
 5F0108F1  # cmp x10, #512
 8B030054  # b.lt rsb_have_data
 6B010891  # add x11, x11, #512
-    ; Check if past preload end (0x42000000 + 16128*512 = 0x427E0000)
-CC4FA8D2  # movz x12, #0x427E, lsl #16
+    ; Check if past preload end (0x78000000 + 16128*512 = 0x787E0000)
+CC0FAFD2  # movz x12, #0x787E, lsl #16
 7F010CEB  # cmp x11, x12
 A2000054  # b.hs rsb_preload_exhausted
 2B3D00F9  # str x11, [x9, #0x78]
@@ -3276,8 +3289,8 @@ F91F00F9  # str x25, [sp, #56]
 341940F9  # ldr x20, [x9, #0x30] # stdin_sector
     ; Store buffer pointer in globals+0x78
     ; Set to buffer - 512 so first advance (triggered by offset=512) lands at buffer start
-EA3FA8D2  # movz x10, #0x41FF, lsl #16
-0AC09FF2  # movk x10, #0xFE00 # 0x42000000 - 512 = 0x41FFFE00
+EAFFAED2  # movz x10, #0x77FF, lsl #16
+0AC09FF2  # movk x10, #0xFE00 # 0x78000000 - 512 = 0x77FFFE00
 2A3D00F9  # str x10, [x9, #0x78]
     ; Set stdin_offset to 512 to trigger first advance
 0A4080D2  # mov x10, #512
@@ -3296,7 +3309,7 @@ CA0680D2  # movz w10, #0x0036
 4A47A2F2  # movk w10, #0x123A, lsl #16
 CA0E00B9  # str w10, [x22, #0x0C]
     ; PIO read all blocks
-1340A8D2  # movz x19, #0x4200, lsl #16 # buffer VA 0x42000000 (PA 0x02000000, slow but safe from file data)
+1300AFD2  # movz x19, #0x7800, lsl #16 # buffer VA 0x78000000 (PA 0x38000000, see map)
 17E087D2  # movz x23, #0x3F00 # 16128 blocks
 :preload_block
 970100B4  # cbz x23, preload_done
@@ -4265,16 +4278,23 @@ DFFCFF97  # bl spi_sd_init
     ;   virt    Entry 2: VA 0x80000000 -> PA 0x80000000 (upper RAM); ~540MB up
     ;           to file data (0xA1900000), clear of the kernel stack -- a single
     ;           fork saves a whole process image (tens of MB).
-    ;   raspi3b Entry 2: VA 0x80000000 -> PA 0x00000000 (aliases low RAM, would
-    ;           clobber the kernel). Keep the legacy VA 0x78000000 (Entry 1 ->
-    ;           PA 0x38000000), valid in the 1GB RAM.
+    ;   raspi3b Entry 2: VA 0x80000000 -> PA 0x00000000 (aliases low RAM). Only
+    ;           the exact base 0x80000000 hits the kernel; higher offsets land in
+    ;           free RAM. Use VA 0x90000000 (-> PA 0x10000000): above the user
+    ;           brk cap (PA 0x0FF00000) and below the file-name/data region (PA
+    ;           0x20900000), a ~264MB hole -- vs the 56MB the legacy Entry-1 base
+    ;           VA 0x78000000 (-> PA 0x38000000) left below the kernel stack.
+    ;           mes self-compiling forks a ~183MB process image (6M-cell arena),
+    ;           which the old 56MB slot could not hold: the fork memcpy walked
+    ;           into the kernel stack and the guest silently rebooted. 264MB
+    ;           holds the peak nested save (kaem ~1MB + mes ~183MB) with margin.
     ; x27 = board id from _trampoline (3 = raspi3b, 0 = virt).
 7F0F00F1  # cmp x27, #3
 60000054  # b.eq save_area_raspi3b
 0A00B0D2  # movz x10, #0x8000, lsl #16 # virt: VA 0x80000000
 02000014  # b save_area_set
 :save_area_raspi3b
-0A00AFD2  # movz x10, #0x7800, lsl #16 # raspi3b: VA 0x78000000 (-> PA 0x38000000)
+0A00B2D2  # movz x10, #0x9000, lsl #16 # raspi3b: VA 0x90000000 (-> PA 0x10000000)
 :save_area_set
 2A1500F9  # str x10, [x9, #0x28]
 
